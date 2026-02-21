@@ -52,6 +52,10 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
 
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
+
   build:
     name: Build (${{ matrix.os }})
     needs: [check-frontend, check-backend]

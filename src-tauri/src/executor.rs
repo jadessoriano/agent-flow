@@ -226,6 +226,7 @@ fn parse_cost_from_stderr(lines: &[String]) -> Option<f64> {
 }
 
 /// Execute a shell or Claude CLI command, returning status, exit code, and cost (for Claude nodes).
+#[allow(clippy::too_many_arguments)]
 async fn execute_shell_or_claude(
     app: &AppHandle,
     run_id: &str,
@@ -330,6 +331,7 @@ async fn execute_shell_or_claude(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_node(
     app: &AppHandle,
     node: &PipelineNode,
@@ -562,6 +564,7 @@ fn build_execution_order(pipeline: &Pipeline) -> Vec<Vec<String>> {
 }
 
 /// Shared execution loop used by both start_run and resume_run.
+#[allow(clippy::too_many_arguments)]
 async fn run_pipeline_loop(
     app: &AppHandle,
     pool: &SqlitePool,
@@ -673,8 +676,9 @@ async fn run_pipeline_loop(
             }
 
             // Auto-approve previously approved gates
-            if node.node_type == "approval-gate" {
-                if prior_approvals.get(node_id) == Some(&"approved".to_string()) {
+            if node.node_type == "approval-gate"
+                && prior_approvals.get(node_id) == Some(&"approved".to_string())
+            {
                     emit_node_log(app, run_id, node_id, "Auto-approved (previously approved)");
                     let result = NodeResult {
                         node_id: node_id.clone(),
@@ -712,7 +716,6 @@ async fn run_pipeline_loop(
                         }
                     }
                     continue;
-                }
             }
 
             // Parallel group: run children in parallel

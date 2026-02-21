@@ -372,6 +372,7 @@ fn compute_duration_secs(started_at: &str, finished_at: Option<&str>) -> Option<
 
 // --- Cost queries ---
 
+#[allow(dead_code)]
 pub async fn get_run_cost(pool: &SqlitePool, run_id: &str) -> Result<f64, String> {
     let row = sqlx::query("SELECT COALESCE(SUM(cost_usd), 0.0) as total FROM run_steps WHERE run_id = ?")
         .bind(run_id)
