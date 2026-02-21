@@ -300,8 +300,8 @@ agent-flow/
 Tag a version to trigger a release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 This builds for all platforms and creates a GitHub Release with downloadable installers.
@@ -310,13 +310,13 @@ This builds for all platforms and creates a GitHub Release with downloadable ins
 
 | Platform | Format | Link |
 |----------|--------|------|
-| Linux | `.deb` | [agent-flow_0.1.0_amd64.deb](https://github.com/jadessoriano/agent-flow/releases/download/v0.1.0/agent-flow_0.1.0_amd64.deb) |
-| Linux | `.AppImage` | [agent-flow_0.1.0_amd64.AppImage](https://github.com/jadessoriano/agent-flow/releases/download/v0.1.0/agent-flow_0.1.0_amd64.AppImage) |
-| macOS | `.dmg` | [AgentFlow_0.1.0_aarch64.dmg](https://github.com/jadessoriano/agent-flow/releases/download/v0.1.0/AgentFlow_0.1.0_aarch64.dmg) |
-| Windows | `.msi` | [AgentFlow_0.1.0_x64_en-US.msi](https://github.com/jadessoriano/agent-flow/releases/download/v0.1.0/AgentFlow_0.1.0_x64_en-US.msi) |
-| Windows | `.exe` | [AgentFlow_0.1.0_x64-setup.exe](https://github.com/jadessoriano/agent-flow/releases/download/v0.1.0/AgentFlow_0.1.0_x64-setup.exe) |
+| Linux | `.deb` | [agent-flow_0.2.0_amd64.deb](https://github.com/jadessoriano/agent-flow/releases/download/v0.2.0/agent-flow_0.2.0_amd64.deb) |
+| Linux | `.AppImage` | [agent-flow_0.2.0_amd64.AppImage](https://github.com/jadessoriano/agent-flow/releases/download/v0.2.0/agent-flow_0.2.0_amd64.AppImage) |
+| macOS | `.dmg` | [AgentFlow_0.2.0_aarch64.dmg](https://github.com/jadessoriano/agent-flow/releases/download/v0.2.0/AgentFlow_0.2.0_aarch64.dmg) |
+| Windows | `.msi` | [AgentFlow_0.2.0_x64_en-US.msi](https://github.com/jadessoriano/agent-flow/releases/download/v0.2.0/AgentFlow_0.2.0_x64_en-US.msi) |
+| Windows | `.exe` | [AgentFlow_0.2.0_x64-setup.exe](https://github.com/jadessoriano/agent-flow/releases/download/v0.2.0/AgentFlow_0.2.0_x64-setup.exe) |
 
-> **Note**: Download links are available after the first release is published. Visit the [Releases page](https://github.com/jadessoriano/agent-flow/releases/latest) for the latest version.
+> **Note**: Download links become available after the release is published. Visit the [Releases page](https://github.com/jadessoriano/agent-flow/releases/latest) for the latest version.
 
 ## How It Works
 
@@ -341,4 +341,4 @@ AgentFlow never calls the Anthropic API directly. Claude Code CLI is always the 
 
 ## License
 
-This project is currently unlicensed. See [LICENSE](LICENSE) for details.
+This project is licensed under the [MIT License](LICENSE).

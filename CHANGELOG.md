@@ -5,6 +5,42 @@ All notable changes to AgentFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-21
+
+### Added
+
+- **Pipeline validation** — cycle detection and sub-pipeline reference checks before run
+- **Copy/paste nodes** — Ctrl+C/V support on the canvas
+- **Desktop notifications** — notify on run completion and approval gates when app is backgrounded
+- **Starter templates** — 5 pipeline templates to get started quickly
+- **Run history filtering** — filter by status, pipeline, and date
+- **Expandable node output** — view full node output in LiveLog panel
+- **Onboarding flow** — guided setup for new projects without `.claude/` directory
+- **Pipeline diff review** — review changes before saving
+- **Comment nodes** — non-executable sticky notes on the canvas
+- **Export run reports** — export run history as markdown
+- **Light/dark theme toggle** — theme switcher with CSS custom properties
+- **Secret variables** — OS keychain integration via `secret.KEY_NAME` syntax
+- **Auto-updater** — in-app update banner with signed builds
+- **Node output passing** — reference upstream output with `{output.NODE_ID}` substitution
+- **Pipeline-agent namespace** — `_pipeline--` prefix prevents naming collisions with manual agents
+- **Self-reference protection** — prevents infinite loops from pipeline nodes referencing their own agent
+- **Agent origin tracking** — UI badges distinguish pipeline-generated vs manual agents
+- **Pipeline rename cleanup** — atomic rename of both JSON and markdown files
+
+### Fixed
+
+- Tauri dev rebuild loop caused by CLAUDE.md files in watched directories
+- Updater error spam in development mode
+- Welcome screen flash on startup (loading state race condition)
+- Updater endpoint URL pointing to wrong repository
+- Secrets not injected during resume-from-failure runs
+
+### Changed
+
+- Version bump from 0.1.0 to 0.2.0
+- Release workflow now includes signing keys, updater artifacts, and `latest.json` generation
+
 ## [0.1.0] - 2026-02-21
 
 ### Added
