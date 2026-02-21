@@ -49,7 +49,8 @@ jobs:
       - name: Build Tauri app
         run: npx tauri build
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -58,10 +59,18 @@ jobs:
           path: |
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.AppImage.tar.gz
+            src-tauri/target/release/bundle/**/*.AppImage.tar.gz.sig
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/release/bundle/**/*.app.tar.gz.sig
             src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.msi.zip
+            src-tauri/target/release/bundle/**/*.msi.zip.sig
             src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.nsis.zip
+            src-tauri/target/release/bundle/**/*.nsis.zip.sig
           if-no-files-found: ignore
 
   publish-release:
@@ -76,6 +85,70 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate latest.json for updater
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          REPO="jadessoriano/agent-flow"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read signatures (empty string if file not found)
+          LINUX_SIG=""
+          MACOS_SIG=""
+          WINDOWS_SIG=""
+
+          for f in artifacts/**/*.AppImage.tar.gz.sig; do
+            [ -f "$f" ] && LINUX_SIG=$(cat "$f")
+          done
+          for f in artifacts/**/*.app.tar.gz.sig; do
+            [ -f "$f" ] && MACOS_SIG=$(cat "$f")
+          done
+          for f in artifacts/**/*.nsis.zip.sig; do
+            [ -f "$f" ] && WINDOWS_SIG=$(cat "$f")
+          done
+
+          # Find updater archive filenames
+          LINUX_FILE=""
+          MACOS_FILE=""
+          WINDOWS_FILE=""
+
+          for f in artifacts/**/*.AppImage.tar.gz; do
+            [ -f "$f" ] && [ ! "${f}" = *".sig" ] && LINUX_FILE=$(basename "$f")
+          done
+          for f in artifacts/**/*.app.tar.gz; do
+            [ -f "$f" ] && [ ! "${f}" = *".sig" ] && MACOS_FILE=$(basename "$f")
+          done
+          for f in artifacts/**/*.nsis.zip; do
+            [ -f "$f" ] && [ ! "${f}" = *".sig" ] && WINDOWS_FILE=$(basename "$f")
+          done
+
+          BASE_URL="https://github.com/${REPO}/releases/download/${GITHUB_REF_NAME}"
+
+          # Build platforms object
+          PLATFORMS="{}"
+          if [ -n "$LINUX_FILE" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg sig "$LINUX_SIG" --arg url "${BASE_URL}/${LINUX_FILE}" \
+              '. + {"linux-x86_64": {"signature": $sig, "url": $url}}')
+          fi
+          if [ -n "$MACOS_FILE" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg sig "$MACOS_SIG" --arg url "${BASE_URL}/${MACOS_FILE}" \
+              '. + {"darwin-aarch64": {"signature": $sig, "url": $url}}')
+          fi
+          if [ -n "$WINDOWS_FILE" ]; then
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg sig "$WINDOWS_SIG" --arg url "${BASE_URL}/${WINDOWS_FILE}" \
+              '. + {"windows-x86_64": {"signature": $sig, "url": $url}}')
+          fi
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "Release ${GITHUB_REF_NAME}" \
+            --arg pub_date "$DATE" \
+            --argjson platforms "$PLATFORMS" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
+            > latest.json
+
+          echo "Generated latest.json:"
+          cat latest.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -85,6 +158,15 @@ jobs:
           files: |
             artifacts/**/*.deb
             artifacts/**/*.AppImage
+            artifacts/**/*.AppImage.tar.gz
+            artifacts/**/*.AppImage.tar.gz.sig
             artifacts/**/*.dmg
+            artifacts/**/*.app.tar.gz
+            artifacts/**/*.app.tar.gz.sig
             artifacts/**/*.msi
+            artifacts/**/*.msi.zip
+            artifacts/**/*.msi.zip.sig
             artifacts/**/*.exe
+            artifacts/**/*.nsis.zip
+            artifacts/**/*.nsis.zip.sig
+            latest.json

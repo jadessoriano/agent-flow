@@ -46,12 +46,14 @@ export default function App() {
     loadSettings();
     loadHistory();
 
-    // Check for updates on startup
-    import("./lib/updater").then(({ checkForUpdate }) => {
-      checkForUpdate().then((info) => {
-        if (info) setUpdateInfo(info);
+    // Check for updates on startup (skip in dev to avoid error spam)
+    if (!import.meta.env.DEV) {
+      import("./lib/updater").then(({ checkForUpdate }) => {
+        checkForUpdate().then((info) => {
+          if (info) setUpdateInfo(info);
+        }).catch(() => {});
       }).catch(() => {});
-    }).catch(() => {});
+    }
   }, [loadRecentProjects, detectFromCwd, loadSettings, loadHistory]);
 
   // Warn before closing with unsaved changes

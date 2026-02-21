@@ -198,6 +198,9 @@ fn hash_pipeline(pipeline: &Pipeline) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Maximum bytes of stdout to capture per node for output passing.
+const MAX_STDOUT_CAPTURE: usize = 102_400; // 100 KB
+
 fn parse_cost_from_stderr(lines: &[String]) -> Option<f64> {
     for line in lines.iter().rev() {
         // Match patterns like "Total cost: $0.0042" or "Cost: $1.23"
@@ -225,7 +228,7 @@ fn parse_cost_from_stderr(lines: &[String]) -> Option<f64> {
     None
 }
 
-/// Execute a shell or Claude CLI command, returning status, exit code, and cost (for Claude nodes).
+/// Execute a shell or Claude CLI command, returning (status, exit_code, cost, captured_stdout).
 #[allow(clippy::too_many_arguments)]
 async fn execute_shell_or_claude(
     app: &AppHandle,
@@ -237,7 +240,7 @@ async fn execute_shell_or_claude(
     cwd: &str,
     timeout_secs: Option<u64>,
     agent: Option<&str>,
-) -> (NodeStatus, Option<i32>, Option<f64>) {
+) -> (NodeStatus, Option<i32>, Option<f64>, String) {
     let mut cmd = if is_claude {
         let mut c = Command::new(cli_path);
         if let Some(agent_name) = agent {
@@ -259,19 +262,28 @@ async fn execute_shell_or_claude(
         Err(e) => {
             log::error!("Node {} spawn error: {}", node_id, e);
             emit_node_log(app, run_id, node_id, &format!("Spawn error: {}", e));
-            return (NodeStatus::Failed, None, None);
+            return (NodeStatus::Failed, None, None, String::new());
         }
     };
 
-    // Stream stdout line-by-line
+    // Stream stdout line-by-line AND buffer for output passing
+    let stdout_buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let stdout_size: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
     if let Some(stdout) = child.stdout.take() {
         let a = app.clone();
         let r = run_id.to_string();
         let n = node_id.to_string();
+        let buf = stdout_buffer.clone();
+        let sz = stdout_size.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 emit_node_log(&a, &r, &n, &line);
+                let mut size = sz.lock().await;
+                if *size < MAX_STDOUT_CAPTURE {
+                    *size += line.len() + 1;
+                    buf.lock().await.push(line);
+                }
             }
         });
     }
@@ -299,12 +311,17 @@ async fn execute_shell_or_claude(
                 let _ = child.kill().await;
                 log::error!("Node {} timed out after {}s", node_id, secs);
                 emit_node_log(app, run_id, node_id, &format!("Timeout after {}s", secs));
-                return (NodeStatus::Failed, None, None);
+                let captured = stdout_buffer.lock().await.join("\n");
+                return (NodeStatus::Failed, None, None, captured);
             }
         }
     } else {
         child.wait().await
     };
+
+    // Small delay to let the stdout/stderr streaming tasks finish flushing
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let captured = stdout_buffer.lock().await.join("\n");
 
     match result {
         Ok(exit) => {
@@ -321,12 +338,12 @@ async fn execute_shell_or_claude(
             } else {
                 None
             };
-            (status, Some(code), cost)
+            (status, Some(code), cost, captured)
         }
         Err(e) => {
             log::error!("Node {} process error: {}", node_id, e);
             emit_node_log(app, run_id, node_id, &format!("Process error: {}", e));
-            (NodeStatus::Failed, None, None)
+            (NodeStatus::Failed, None, None, captured)
         }
     }
 }
@@ -338,6 +355,7 @@ async fn execute_node(
     run_id: &str,
     variables: &HashMap<String, String>,
     inputs: &HashMap<String, String>,
+    node_outputs: &HashMap<String, String>,
     cli_path: &str,
     project_path: &str,
     active_run: &ActiveRunHandle,
@@ -374,6 +392,10 @@ async fn execute_node(
         instructions = instructions.replace(&format!("{{input.{}}}", k), v);
         instructions = instructions.replace(&format!("{{{}}}", k), v);
     }
+    // Substitute upstream node outputs: {output.NODE_ID} or {output.node-name-slug}
+    for (k, v) in node_outputs {
+        instructions = instructions.replace(&format!("{{output.{}}}", k), v);
+    }
 
     let max_attempts = node.retry.as_ref().map(|r| r.max).unwrap_or(1).max(1);
     let retry_delay = node.retry.as_ref().map(|r| r.delay).unwrap_or(0);
@@ -386,7 +408,7 @@ async fn execute_node(
             &format!("--- {} (attempt {}/{}) ---", node.name, attempt, max_attempts),
         );
 
-        let (status, exit_code, cost_usd) = match node.node_type.as_str() {
+        let (status, exit_code, cost_usd, captured_output) = match node.node_type.as_str() {
             "shell" | "git" => {
                 execute_shell_or_claude(
                     app,
@@ -476,14 +498,14 @@ async fn execute_node(
                     rx.await.unwrap_or(false)
                 };
                 if approved {
-                    (NodeStatus::Success, Some(0), None)
+                    (NodeStatus::Success, Some(0), None, String::new())
                 } else {
-                    (NodeStatus::Failed, Some(1), None)
+                    (NodeStatus::Failed, Some(1), None, String::new())
                 }
             }
-            "comment" => (NodeStatus::Skipped, Some(0), None),
-            "sub-pipeline" | "parallel" => (NodeStatus::Success, Some(0), None),
-            _ => (NodeStatus::Success, Some(0), None),
+            "comment" => (NodeStatus::Skipped, Some(0), None, String::new()),
+            "sub-pipeline" | "parallel" => (NodeStatus::Success, Some(0), None, String::new()),
+            _ => (NodeStatus::Success, Some(0), None, String::new()),
         };
 
         if status == NodeStatus::Success || attempt == max_attempts {
@@ -491,7 +513,7 @@ async fn execute_node(
                 node_id: node.id.clone(),
                 status,
                 exit_code,
-                output: String::new(),
+                output: captured_output,
                 started_at: Some(started_at),
                 finished_at: Some(now_iso()),
                 attempt,
@@ -587,6 +609,7 @@ async fn run_pipeline_loop(
         .map(|n| (n.id.clone(), n.clone()))
         .collect();
     let mut results: HashMap<String, NodeResult> = HashMap::new();
+    let mut node_outputs: HashMap<String, String> = HashMap::new();
     let mut skipped: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for level in &exec_order {
@@ -729,12 +752,13 @@ async fn run_pipeline_loop(
                             let r = run_id.to_string();
                             let v = pipeline.variables.clone();
                             let i = inputs.clone();
+                            let o = node_outputs.clone();
                             let c = cli_path.to_string();
                             let p = project_path.to_string();
                             let h = active_run.clone();
                             let pn = pipeline.name.clone();
                             handles.push(tokio::spawn(async move {
-                                execute_node(&a, &n, &r, &v, &i, &c, &p, &h, &pn).await
+                                execute_node(&a, &n, &r, &v, &i, &o, &c, &p, &h, &pn).await
                             }));
                         }
                     }
@@ -976,12 +1000,13 @@ async fn run_pipeline_loop(
             let r = run_id.to_string();
             let v = pipeline.variables.clone();
             let i = inputs.clone();
+            let o = node_outputs.clone();
             let c = cli_path.to_string();
             let p = project_path.to_string();
             let h = active_run.clone();
             let pn = pipeline.name.clone();
             handles.push(tokio::spawn(
-                async move { execute_node(&a, &n, &r, &v, &i, &c, &p, &h, &pn).await },
+                async move { execute_node(&a, &n, &r, &v, &i, &o, &c, &p, &h, &pn).await },
             ));
         }
 
@@ -1037,6 +1062,19 @@ async fn run_pipeline_loop(
                             };
                             let _ = db::update_step_approval(pool, step_id, state).await;
                         }
+                    }
+                }
+
+                // Store output for downstream node substitution
+                if result.status == NodeStatus::Success && !result.output.is_empty() {
+                    node_outputs.insert(result.node_id.clone(), result.output.clone());
+                    // Also key by slugified node name for convenience
+                    if let Some(n) = node {
+                        let slug: String = n.name.to_lowercase()
+                            .chars()
+                            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                            .collect();
+                        node_outputs.insert(slug, result.output.clone());
                     }
                 }
 
@@ -1214,6 +1252,13 @@ pub async fn start_run(
             }
         };
 
+        // Inject secrets into pipeline variables as secret.KEY_NAME
+        let secrets = crate::secrets::load_secrets(&project_path);
+        let mut pipeline = pipeline;
+        for (k, v) in secrets {
+            pipeline.variables.insert(format!("secret.{}", k), v);
+        }
+
         let mut ancestors = HashSet::new();
         ancestors.insert(pipeline.name.clone());
         let final_status = run_pipeline_loop(
@@ -1379,6 +1424,13 @@ pub async fn resume_run(
             claude_cli_path
         };
 
+        // Inject secrets into pipeline variables as secret.KEY_NAME
+        let secrets = crate::secrets::load_secrets(&project_path);
+        let mut pipeline = pipeline;
+        for (k, v) in secrets {
+            pipeline.variables.insert(format!("secret.{}", k), v);
+        }
+
         let mut ancestors = HashSet::new();
         ancestors.insert(pipeline.name.clone());
         let final_status = run_pipeline_loop(
@@ -1524,4 +1576,261 @@ pub async fn get_avg_ai_cost(app: AppHandle) -> Result<Option<f64>, String> {
         .map(|s| s.inner().clone())
         .ok_or_else(|| "Database not available".to_string())?;
     db::get_avg_ai_step_cost(&pool).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline_engine::{Pipeline, PipelineEdge, PipelineNode, Position};
+
+    fn make_node(id: &str, name: &str) -> PipelineNode {
+        PipelineNode {
+            id: id.into(),
+            name: name.into(),
+            node_type: "shell".into(),
+            instructions: format!("echo {}", id),
+            agent: None,
+            inputs: vec![],
+            outputs: vec![],
+            retry: None,
+            timeout: None,
+            children: None,
+            pipeline_ref: None,
+            requires_tools: vec![],
+            position: Position { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn make_edge(from: &str, to: &str, condition: Option<&str>) -> PipelineEdge {
+        PipelineEdge {
+            id: format!("{}->{}", from, to),
+            from: from.into(),
+            to: to.into(),
+            condition: condition.map(|s| s.to_string()),
+        }
+    }
+
+    // --- parse_cost_from_stderr ---
+
+    #[test]
+    fn parse_cost_total_cost_line() {
+        let lines = vec![
+            "Some output".into(),
+            "Total cost: $0.0042".into(),
+        ];
+        assert_eq!(parse_cost_from_stderr(&lines), Some(0.0042));
+    }
+
+    #[test]
+    fn parse_cost_no_cost() {
+        let lines = vec!["No cost info here".into()];
+        assert_eq!(parse_cost_from_stderr(&lines), None);
+    }
+
+    #[test]
+    fn parse_cost_empty() {
+        let lines: Vec<String> = vec![];
+        assert_eq!(parse_cost_from_stderr(&lines), None);
+    }
+
+    #[test]
+    fn parse_cost_json_format() {
+        let lines = vec![r#"{"total_cost_usd": 1.23}"#.into()];
+        assert_eq!(parse_cost_from_stderr(&lines), Some(1.23));
+    }
+
+    #[test]
+    fn parse_cost_picks_last_match() {
+        let lines = vec![
+            "Total cost: $0.01".into(),
+            "Total cost: $0.05".into(),
+        ];
+        // iter().rev() finds the last one first
+        assert_eq!(parse_cost_from_stderr(&lines), Some(0.05));
+    }
+
+    // --- hash_instructions ---
+
+    #[test]
+    fn hash_instructions_deterministic() {
+        let h1 = hash_instructions("echo hello");
+        let h2 = hash_instructions("echo hello");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_instructions_different_inputs() {
+        let h1 = hash_instructions("echo hello");
+        let h2 = hash_instructions("echo world");
+        assert_ne!(h1, h2);
+    }
+
+    // --- hash_pipeline ---
+
+    #[test]
+    fn hash_pipeline_deterministic() {
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![make_node("a", "A"), make_node("b", "B")],
+            edges: vec![make_edge("a", "b", None)],
+        };
+        let h1 = hash_pipeline(&p);
+        let h2 = hash_pipeline(&p);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_pipeline_changes_with_instructions() {
+        let mut p1 = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![make_node("a", "A")],
+            edges: vec![],
+        };
+        let h1 = hash_pipeline(&p1);
+        p1.nodes[0].instructions = "echo changed".into();
+        let h2 = hash_pipeline(&p1);
+        assert_ne!(h1, h2);
+    }
+
+    // --- should_execute_edge ---
+
+    #[test]
+    fn edge_no_condition_always_fires() {
+        assert!(should_execute_edge(&None, &NodeStatus::Success));
+        assert!(should_execute_edge(&None, &NodeStatus::Failed));
+        assert!(should_execute_edge(&None, &NodeStatus::Cancelled));
+    }
+
+    #[test]
+    fn edge_success_condition() {
+        assert!(should_execute_edge(&Some("success".into()), &NodeStatus::Success));
+        assert!(!should_execute_edge(&Some("success".into()), &NodeStatus::Failed));
+    }
+
+    #[test]
+    fn edge_failure_condition() {
+        assert!(!should_execute_edge(&Some("failure".into()), &NodeStatus::Success));
+        assert!(should_execute_edge(&Some("failure".into()), &NodeStatus::Failed));
+    }
+
+    #[test]
+    fn edge_always_condition() {
+        assert!(should_execute_edge(&Some("always".into()), &NodeStatus::Success));
+        assert!(should_execute_edge(&Some("always".into()), &NodeStatus::Failed));
+    }
+
+    // --- build_execution_order ---
+
+    #[test]
+    fn exec_order_linear_chain() {
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![make_node("a", "A"), make_node("b", "B"), make_node("c", "C")],
+            edges: vec![make_edge("a", "b", None), make_edge("b", "c", None)],
+        };
+        let order = build_execution_order(&p);
+        assert_eq!(order.len(), 3);
+        assert_eq!(order[0], vec!["a"]);
+        assert_eq!(order[1], vec!["b"]);
+        assert_eq!(order[2], vec!["c"]);
+    }
+
+    #[test]
+    fn exec_order_parallel_roots() {
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![make_node("a", "A"), make_node("b", "B")],
+            edges: vec![],
+        };
+        let order = build_execution_order(&p);
+        assert_eq!(order.len(), 1);
+        assert_eq!(order[0].len(), 2);
+    }
+
+    #[test]
+    fn exec_order_diamond() {
+        // a -> b, a -> c, b -> d, c -> d
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![
+                make_node("a", "A"),
+                make_node("b", "B"),
+                make_node("c", "C"),
+                make_node("d", "D"),
+            ],
+            edges: vec![
+                make_edge("a", "b", None),
+                make_edge("a", "c", None),
+                make_edge("b", "d", None),
+                make_edge("c", "d", None),
+            ],
+        };
+        let order = build_execution_order(&p);
+        assert_eq!(order.len(), 3);
+        assert_eq!(order[0], vec!["a"]);
+        assert_eq!(order[1].len(), 2); // b and c in parallel
+        assert_eq!(order[2], vec!["d"]);
+    }
+
+    #[test]
+    fn exec_order_empty_pipeline() {
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![],
+            edges: vec![],
+        };
+        let order = build_execution_order(&p);
+        assert!(order.is_empty());
+    }
+
+    // --- validate_sub_pipeline_refs ---
+
+    #[test]
+    fn validate_sub_pipeline_refs_ok() {
+        let mut node = make_node("a", "Sub");
+        node.node_type = "sub-pipeline".into();
+        node.pipeline_ref = Some("other-pipeline".into());
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![node],
+            edges: vec![],
+        };
+        assert!(validate_sub_pipeline_refs(&p).is_ok());
+    }
+
+    #[test]
+    fn validate_sub_pipeline_refs_missing() {
+        let mut node = make_node("a", "Sub");
+        node.node_type = "sub-pipeline".into();
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![node],
+            edges: vec![],
+        };
+        assert!(validate_sub_pipeline_refs(&p).is_err());
+    }
 }

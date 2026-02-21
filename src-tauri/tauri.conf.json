@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AgentFlow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.agentflow.app",
   "build": {
     "frontendDist": "../dist",
@@ -29,9 +29,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/anthropics/agent-flow/releases/latest/download/latest.json"
+        "https://github.com/jadessoriano/agent-flow/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4MUMwQjdDNEUwNDg0RUUKUldUdWhBUk9mQXNjbU82Ui9rdFNYN2pnajBTV3l1VEkyQmcyOGUxa2x1b2xsRURHd3pvN0dvcWUK"
     }
   },
   "bundle": {

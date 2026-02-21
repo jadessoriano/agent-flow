@@ -2,3 +2,7 @@ node_modules/
 dist/
 dist-node/
 src-tauri/target/
+
+# Claude memory files (local, not source code — triggers Tauri rebuild loop)
+**/CLAUDE.md
+!/CLAUDE.md

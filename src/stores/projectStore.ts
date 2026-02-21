@@ -18,7 +18,7 @@ interface ProjectState {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   currentProject: null,
   recentProjects: [],
-  loading: false,
+  loading: true,
 
   openProject: async (path: string) => {
     set({ loading: true });
