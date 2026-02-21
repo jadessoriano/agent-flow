@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useRunStore } from "../../stores/runStore";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import type { RunRow } from "../../types/run";
 import { formatDuration } from "../../lib/format";
+import { addToast } from "../../lib/errorReporter";
 
 function formatCost(cost: number): string {
   if (cost < 0.01) return `$${cost.toFixed(4)}`;
@@ -19,6 +21,9 @@ function formatTime(iso: string): string {
   }
 }
 
+type StatusFilter = "all" | "success" | "failed" | "cancelled";
+type DateFilter = "all" | "today" | "week" | "month";
+
 export default function RunHistory() {
   const runHistory = useRunStore((s) => s.runHistory);
   const persistedHistory = useRunStore((s) => s.persistedHistory);
@@ -27,6 +32,9 @@ export default function RunHistory() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const settings = useSettingsStore((s) => s.settings);
   const currentProject = useProjectStore((s) => s.currentProject);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [pipelineFilter, setPipelineFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
 
   // Merge in-memory and persisted history, deduplicate by run_id
   const seen = new Set<string>();
@@ -44,6 +52,30 @@ export default function RunHistory() {
       allRuns.push({ type: "persisted", data: run });
     }
   }
+
+  // Apply filters
+  const now = new Date();
+  const filteredRuns = allRuns.filter((entry) => {
+    const status = entry.type === "memory" ? entry.data.status : entry.data.status;
+    const pName = entry.type === "memory" ? entry.data.pipeline_name : entry.data.pipeline_name;
+    const startedAt = entry.type === "persisted" ? entry.data.started_at : null;
+
+    if (statusFilter !== "all" && status !== statusFilter) return false;
+    if (pipelineFilter && !pName.toLowerCase().includes(pipelineFilter.toLowerCase())) return false;
+    if (dateFilter !== "all" && startedAt) {
+      const d = new Date(startedAt);
+      if (dateFilter === "today") {
+        if (d.toDateString() !== now.toDateString()) return false;
+      } else if (dateFilter === "week") {
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        if (d < weekAgo) return false;
+      } else if (dateFilter === "month") {
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        if (d < monthAgo) return false;
+      }
+    }
+    return true;
+  });
 
   if (allRuns.length === 0) {
     return (
@@ -76,9 +108,82 @@ export default function RunHistory() {
     }
   };
 
+  const handleExportRun = async (runId: string) => {
+    try {
+      const { getRunDetails } = await import("../../lib/tauri");
+      const [run, steps] = await getRunDetails(runId);
+      const { generateRunReport } = await import("../../lib/exportReport");
+      // Build a minimal RunState from persisted data
+      const nodeResults: Record<string, { status: string; exit_code?: number | null; output: string; started_at?: string | null; finished_at?: string | null; attempt: number; cost_usd?: number | null }> = {};
+      for (const step of steps) {
+        nodeResults[step.node_id] = {
+          status: step.status,
+          exit_code: step.exit_code,
+          output: "",
+          started_at: step.started_at,
+          finished_at: step.finished_at,
+          attempt: step.attempt,
+          cost_usd: step.cost_usd,
+        };
+      }
+      const report = generateRunReport(
+        { run_id: run.id, pipeline_name: run.pipeline_name, status: run.status, node_results: nodeResults as never, current_node: null, total_cost_usd: 0 },
+        {},
+        null,
+      );
+      await navigator.clipboard.writeText(report);
+      addToast("Run report copied to clipboard", "info");
+    } catch {
+      addToast("Failed to export run report", "warning");
+    }
+  };
+
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      {allRuns.map((entry, i) => {
+    <div className="flex h-full flex-col">
+      {/* Filter bar */}
+      <div className="border-b border-zinc-800 px-4 py-2">
+        <div className="mb-2 flex flex-wrap gap-1">
+          {(["all", "success", "failed", "cancelled"] as StatusFilter[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                statusFilter === s
+                  ? s === "success" ? "bg-green-500/20 text-green-400"
+                    : s === "failed" ? "bg-red-500/20 text-red-400"
+                    : s === "cancelled" ? "bg-yellow-500/20 text-yellow-400"
+                    : "bg-zinc-600/30 text-zinc-200"
+                  : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              }`}
+            >
+              {s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={pipelineFilter}
+            onChange={(e) => setPipelineFilter(e.target.value)}
+            placeholder="Filter by pipeline..."
+            className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+          />
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+            className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 focus:border-violet-500 focus:outline-none"
+            style={{ colorScheme: "dark" }}
+          >
+            <option value="all">All time</option>
+            <option value="today">Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+      {filteredRuns.map((entry, i) => {
         if (entry.type === "memory") {
           const run = entry.data;
           const nodeCount = Object.keys(run.node_results).length;
@@ -129,14 +234,16 @@ export default function RunHistory() {
                   </span>
                 )}
               </div>
-              {run.status === "failed" && !running && (
-                <button
-                  onClick={() => handleResume(run.run_id)}
-                  className="mt-2 rounded bg-blue-600/20 px-2 py-0.5 text-xs text-blue-400 hover:bg-blue-600/30"
-                >
-                  Resume from failure
-                </button>
-              )}
+              <div className="mt-2 flex gap-2">
+                {run.status === "failed" && !running && (
+                  <button
+                    onClick={() => handleResume(run.run_id)}
+                    className="rounded bg-blue-600/20 px-2 py-0.5 text-xs text-blue-400 hover:bg-blue-600/30"
+                  >
+                    Resume from failure
+                  </button>
+                )}
+              </div>
             </div>
           );
         } else {
@@ -180,18 +287,27 @@ export default function RunHistory() {
                 )}
                 <span>{run.id}</span>
               </div>
-              {run.status === "failed" && !running && (
+              <div className="mt-2 flex gap-2">
+                {run.status === "failed" && !running && (
+                  <button
+                    onClick={() => handleResume(run.id, run.trigger_input)}
+                    className="rounded bg-blue-600/20 px-2 py-0.5 text-xs text-blue-400 hover:bg-blue-600/30"
+                  >
+                    Resume from failure
+                  </button>
+                )}
                 <button
-                  onClick={() => handleResume(run.id, run.trigger_input)}
-                  className="mt-2 rounded bg-blue-600/20 px-2 py-0.5 text-xs text-blue-400 hover:bg-blue-600/30"
+                  onClick={() => handleExportRun(run.id)}
+                  className="rounded bg-zinc-700/50 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
                 >
-                  Resume from failure
+                  Export
                 </button>
-              )}
+              </div>
             </div>
           );
         }
       })}
+      </div>
     </div>
   );
 }

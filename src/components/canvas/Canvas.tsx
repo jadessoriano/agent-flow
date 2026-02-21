@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { usePipelineStore } from "../../stores/pipelineStore";
+import { useProjectStore } from "../../stores/projectStore";
 import { useRunStore } from "../../stores/runStore";
 import { useUIStore } from "../../stores/uiStore";
 import type { Viewport } from "@xyflow/react";
@@ -94,9 +95,12 @@ function pipelineEdgesToFlow(
 }
 
 export default function Canvas() {
+  const pipelines = usePipelineStore((s) => s.pipelines);
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const currentPipelinePath = usePipelineStore((s) => s.currentPipelinePath);
+  const createFromTemplate = usePipelineStore((s) => s.createFromTemplate);
   const addNode = usePipelineStore((s) => s.addNode);
+  const currentProject = useProjectStore((s) => s.currentProject);
   const addPipelineEdge = usePipelineStore((s) => s.addEdge);
   const updateNodePosition = usePipelineStore((s) => s.updateNodePosition);
   const removeNode = usePipelineStore((s) => s.removeNode);
@@ -338,6 +342,15 @@ export default function Canvas() {
   }, [currentPipeline, currentPipelinePath, updateAllNodePositions]);
 
   if (!currentPipeline) {
+    const handleCreateSample = () => {
+      if (!currentProject) return;
+      import("../../data/templates").then(({ TEMPLATES }) => {
+        if (TEMPLATES.length > 0) {
+          createFromTemplate(currentProject.path, TEMPLATES[0].pipeline);
+        }
+      });
+    };
+
     return (
       <div className="relative h-full w-full">
         <ReactFlow
@@ -360,8 +373,28 @@ export default function Canvas() {
             <svg className="mx-auto mb-3 h-12 w-12 text-zinc-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
             </svg>
-            <p className="text-sm text-zinc-600">Select a pipeline or create a new one</p>
-            <p className="mt-1 text-xs text-zinc-700">Use the pipeline selector in the top bar</p>
+            {pipelines.length === 0 ? (
+              <>
+                <p className="text-sm text-zinc-500">No pipelines yet</p>
+                <p className="mt-1 text-xs text-zinc-600">Get started by creating your first pipeline</p>
+                <ul className="mt-3 text-xs text-zinc-600 text-left inline-block">
+                  <li className="mb-1">- Drag nodes from the palette to build workflows</li>
+                  <li className="mb-1">- Connect nodes to define execution order</li>
+                  <li className="mb-1">- Run pipelines to automate tasks with AI</li>
+                </ul>
+                <button
+                  onClick={handleCreateSample}
+                  className="pointer-events-auto mt-4 rounded-lg bg-violet-600 px-4 py-2 text-xs font-medium text-white hover:bg-violet-500"
+                >
+                  Create Sample Pipeline
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-zinc-600">Select a pipeline or create a new one</p>
+                <p className="mt-1 text-xs text-zinc-700">Use the pipeline selector in the top bar</p>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -417,6 +450,7 @@ export default function Canvas() {
               "parallel": "#3b82f6",
               "approval-gate": "#f59e0b",
               "sub-pipeline": "#06b6d4",
+              "comment": "#a1a1aa",
             };
             return colors[nd?.nodeType] ?? "#71717a";
           }}

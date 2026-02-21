@@ -6,6 +6,7 @@ import { NODE_TYPE_META } from "../../types/pipeline";
 import NodeIcon from "../canvas/nodes/NodeIcons";
 
 const isSubPipeline = (type: string) => type === "sub-pipeline";
+const isComment = (type: string) => type === "comment";
 
 export default function NodeConfig() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
@@ -114,8 +115,24 @@ export default function NodeConfig() {
           />
         </div>
 
+        {/* Comment mode: show only text area */}
+        {isComment(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Comment Text
+            </label>
+            <textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              rows={6}
+              className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+              placeholder="Write your comment or note here..."
+            />
+          </div>
+        )}
+
         {/* Sub-pipeline selector */}
-        {isSubPipeline(node.type) && (
+        {!isComment(node.type) && isSubPipeline(node.type) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Pipeline
@@ -143,8 +160,8 @@ export default function NodeConfig() {
           </div>
         )}
 
-        {/* Instructions (hidden for sub-pipeline nodes) */}
-        {!isSubPipeline(node.type) && (
+        {/* Instructions (hidden for sub-pipeline and comment nodes) */}
+        {!isSubPipeline(node.type) && !isComment(node.type) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               {node.type === "shell" || node.type === "git"
@@ -165,8 +182,8 @@ export default function NodeConfig() {
           </div>
         )}
 
-        {/* Agent selector (AI tasks only) */}
-        {node.type === "ai-task" && (
+        {/* Agent selector (AI tasks only, not comments) */}
+        {!isComment(node.type) && node.type === "ai-task" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Agent
@@ -206,8 +223,8 @@ export default function NodeConfig() {
           </div>
         )}
 
-        {/* Required MCP Tools (AI tasks only) */}
-        {node.type === "ai-task" && (
+        {/* Required MCP Tools (AI tasks only, not comments) */}
+        {!isComment(node.type) && node.type === "ai-task" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Required MCP Tools
@@ -225,81 +242,89 @@ export default function NodeConfig() {
           </div>
         )}
 
-        {/* Inputs */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
-            Inputs
-          </label>
-          <input
-            type="text"
-            value={inputs}
-            onChange={(e) => setInputs(e.target.value)}
-            placeholder="comma-separated input names"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
-          />
-        </div>
+        {/* Inputs (hidden for comments) */}
+        {!isComment(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Inputs
+            </label>
+            <input
+              type="text"
+              value={inputs}
+              onChange={(e) => setInputs(e.target.value)}
+              placeholder="comma-separated input names"
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+            />
+          </div>
+        )}
 
         {/* Outputs */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
-            Outputs
-          </label>
-          <input
-            type="text"
-            value={outputs}
-            onChange={(e) => setOutputs(e.target.value)}
-            placeholder="comma-separated output names"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
-          />
-        </div>
+        {!isComment(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Outputs
+            </label>
+            <input
+              type="text"
+              value={outputs}
+              onChange={(e) => setOutputs(e.target.value)}
+              placeholder="comma-separated output names"
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+            />
+          </div>
+        )}
 
         {/* Retry */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
-            Retry Policy
-          </label>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="mb-0.5 block text-[10px] text-zinc-500">
-                Max attempts
-              </label>
-              <input
-                type="number"
-                min={0}
-                value={retryMax}
-                onChange={(e) => setRetryMax(Number(e.target.value))}
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="mb-0.5 block text-[10px] text-zinc-500">
-                Delay (sec)
-              </label>
-              <input
-                type="number"
-                min={0}
-                value={retryDelay}
-                onChange={(e) => setRetryDelay(Number(e.target.value))}
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-              />
+        {!isComment(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Retry Policy
+            </label>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="mb-0.5 block text-[10px] text-zinc-500">
+                  Max attempts
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={retryMax}
+                  onChange={(e) => setRetryMax(Number(e.target.value))}
+                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="mb-0.5 block text-[10px] text-zinc-500">
+                  Delay (sec)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={retryDelay}
+                  onChange={(e) => setRetryDelay(Number(e.target.value))}
+                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Timeout */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
-            Timeout (seconds)
-          </label>
-          <input
-            type="number"
-            min={0}
-            value={timeout}
-            onChange={(e) => setTimeout_(Number(e.target.value))}
-            placeholder="0 = no timeout"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
-          />
-        </div>
+        {!isComment(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Timeout (seconds)
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={timeout}
+              onChange={(e) => setTimeout_(Number(e.target.value))}
+              placeholder="0 = no timeout"
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+            />
+          </div>
+        )}
 
         {/* Apply */}
         <button

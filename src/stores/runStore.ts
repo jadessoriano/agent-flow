@@ -17,6 +17,7 @@ interface RunStoreState {
   lastRunInputs: Record<string, string>;
   runHistory: RunState[];
   persistedHistory: RunRow[];
+  focusedNodeId: string | null;
 
   startRun: (
     pipeline: Pipeline,
@@ -51,8 +52,10 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   runHistory: [],
   persistedHistory: [],
 
+  focusedNodeId: null,
+
   startRun: async (pipeline, inputs, cliPath, projectPath) => {
-    set({ running: true, logs: {}, approvalRequest: null, approvalResponse: null, lastRunInputs: inputs });
+    set({ running: true, logs: {}, approvalRequest: null, approvalResponse: null, lastRunInputs: inputs, focusedNodeId: null });
     try {
       await api.startRun(pipeline, inputs, cliPath, projectPath);
     } catch (e) {

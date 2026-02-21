@@ -23,17 +23,20 @@ interface PipelineState {
   pipelines: PipelineInfo[];
   currentPipeline: Pipeline | null;
   currentPipelinePath: string | null;
+  savedPipeline: Pipeline | null;
   dirty: boolean;
   loading: boolean;
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   undoStack: Pipeline[];
   redoStack: Pipeline[];
+  clipboardNode: PipelineNode | null;
 
   loadPipelines: (projectPath: string) => Promise<void>;
   openPipeline: (path: string) => Promise<void>;
   savePipeline: (projectPath: string) => Promise<void>;
   createPipeline: (projectPath: string, name: string) => void;
+  createFromTemplate: (projectPath: string, template: Pipeline) => void;
   deletePipeline: (projectPath: string, path: string) => Promise<void>;
   closePipeline: () => void;
   loadGeneratedPipeline: (projectPath: string, pipeline: Pipeline) => Promise<void>;
@@ -50,6 +53,8 @@ interface PipelineState {
   selectNode: (id: string | null) => void;
   selectEdge: (id: string | null) => void;
   updatePipelineMeta: (updates: Partial<Pipeline>) => void;
+  copyNode: () => void;
+  pasteNode: () => void;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
@@ -60,12 +65,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   pipelines: [],
   currentPipeline: null,
   currentPipelinePath: null,
+  savedPipeline: null,
   dirty: false,
   loading: false,
   selectedNodeId: null,
   selectedEdgeId: null,
   undoStack: [],
   redoStack: [],
+  clipboardNode: null,
 
   loadPipelines: async (projectPath: string) => {
     try {
@@ -83,6 +90,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       set({
         currentPipeline: pipeline,
         currentPipelinePath: path,
+        savedPipeline: structuredClone(pipeline),
         dirty: false,
         loading: false,
         selectedNodeId: null,
@@ -106,13 +114,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         if (oldSafeName && oldSafeName !== newSafeName) {
           // Name changed — use rename to clean up old agent markdown
           const path = await api.renamePipeline(projectPath, currentPipelinePath, currentPipeline.name);
-          set({ currentPipelinePath: path, dirty: false });
+          set({ currentPipelinePath: path, dirty: false, savedPipeline: structuredClone(currentPipeline) });
           get().loadPipelines(projectPath);
           return;
         }
       }
       const path = await api.writePipeline(projectPath, currentPipeline);
-      set({ currentPipelinePath: path, dirty: false });
+      set({ currentPipelinePath: path, dirty: false, savedPipeline: structuredClone(currentPipeline) });
       get().loadPipelines(projectPath);
     } catch (e) {
       throw e;
@@ -166,6 +174,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     });
   },
 
+  createFromTemplate: (projectPath: string, template: Pipeline) => {
+    const pipeline = structuredClone(template);
+    set({
+      currentPipeline: pipeline,
+      currentPipelinePath: null,
+      dirty: true,
+      selectedNodeId: null,
+    });
+    void (async () => {
+      try {
+        const path = await api.writePipeline(projectPath, pipeline);
+        set({ currentPipelinePath: path, dirty: false, savedPipeline: structuredClone(pipeline) });
+        const store = usePipelineStore.getState();
+        store.loadPipelines(projectPath);
+      } catch {
+        // ignore
+      }
+    })();
+  },
+
   loadGeneratedPipeline: async (projectPath: string, pipeline: Pipeline) => {
     try {
       const path = await api.writePipeline(projectPath, pipeline);
@@ -197,6 +225,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       parallel: "Parallel Group",
       "approval-gate": "Approval Gate",
       "sub-pipeline": "Sub-pipeline",
+      comment: "Comment",
     };
 
     const node: PipelineNode = {
@@ -356,6 +385,40 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     set({
       currentPipeline: { ...currentPipeline, ...updates },
       dirty: true,
+    });
+  },
+
+  copyNode: () => {
+    const { currentPipeline, selectedNodeId } = get();
+    if (!currentPipeline || !selectedNodeId) return;
+    const node = currentPipeline.nodes.find((n) => n.id === selectedNodeId);
+    if (node) {
+      set({ clipboardNode: structuredClone(node) });
+    }
+  },
+
+  pasteNode: () => {
+    const { currentPipeline, clipboardNode, undoStack } = get();
+    if (!currentPipeline || !clipboardNode) return;
+    set({ undoStack: [...undoStack, structuredClone(currentPipeline)].slice(-MAX_HISTORY), redoStack: [] });
+
+    const newNode: PipelineNode = {
+      ...structuredClone(clipboardNode),
+      id: nextNodeId(),
+      name: `${clipboardNode.name} (copy)`,
+      position: {
+        x: clipboardNode.position.x + 40,
+        y: clipboardNode.position.y + 40,
+      },
+    };
+
+    set({
+      currentPipeline: {
+        ...currentPipeline,
+        nodes: [...currentPipeline.nodes, newNode],
+      },
+      dirty: true,
+      selectedNodeId: newNode.id,
     });
   },
 

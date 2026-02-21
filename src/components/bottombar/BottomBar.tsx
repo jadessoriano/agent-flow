@@ -21,7 +21,7 @@ export default function BottomBar() {
   const unreadErrors = useErrorLogStore((s) => s.unreadCount);
 
   return (
-    <div className="flex h-8 items-center justify-between border-t border-zinc-700/70 bg-zinc-900 px-4">
+    <div className="flex h-8 items-center justify-between border-t border-[var(--border)] bg-[var(--bg-secondary)] px-4">
       {/* Left: Panel toggles */}
       <div className="flex items-center gap-1">
         <button

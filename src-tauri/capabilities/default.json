@@ -18,6 +18,13 @@
     "fs:allow-stat",
     "shell:default",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
   ]
 }

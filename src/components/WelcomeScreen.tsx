@@ -34,7 +34,7 @@ export default function WelcomeScreen() {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-zinc-950">
+    <div className="flex h-screen w-screen flex-col items-center justify-center bg-[var(--bg-primary)]">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="mb-8 text-center">
@@ -127,8 +127,33 @@ export default function WelcomeScreen() {
             </div>
           </div>
         )}
+        {/* Get Started tips */}
+        <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+            Get Started
+          </h3>
+          <ul className="space-y-1.5 text-xs text-zinc-400">
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 text-violet-400">1.</span>
+              <span>Open a project directory containing a <code className="text-zinc-300">.claude/</code> folder</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 text-violet-400">2.</span>
+              <span>Create a pipeline or start from a template</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 text-violet-400">3.</span>
+              <span>Drag nodes onto the canvas and connect them</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 text-violet-400">4.</span>
+              <span>Click <strong className="text-zinc-300">Run</strong> to execute with Claude Code CLI</span>
+            </li>
+          </ul>
+        </div>
+
         {/* About link */}
-        <div className="mt-6 text-center">
+        <div className="mt-4 text-center">
           <button
             onClick={() => setAboutOpen(true)}
             className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300"

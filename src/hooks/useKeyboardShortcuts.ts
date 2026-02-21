@@ -14,6 +14,8 @@ export function useKeyboardShortcuts() {
   const selectNode = usePipelineStore((s) => s.selectNode);
   const undo = usePipelineStore((s) => s.undo);
   const redo = usePipelineStore((s) => s.redo);
+  const copyNode = usePipelineStore((s) => s.copyNode);
+  const pasteNode = usePipelineStore((s) => s.pasteNode);
   const running = useRunStore((s) => s.running);
   const startRun = useRunStore((s) => s.startRun);
   const cancelRun = useRunStore((s) => s.cancelRun);
@@ -67,6 +69,34 @@ export function useKeyboardShortcuts() {
       // Delete/Backspace — delete selected node (handled by React Flow)
       // We don't override here since React Flow's deleteKeyCode handles it
 
+      // Ctrl+C — copy node (guarded against input/textarea focus)
+      if (
+        isMod &&
+        e.key === "c" &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target instanceof HTMLSelectElement)
+      ) {
+        if (selectedNodeId) {
+          e.preventDefault();
+          copyNode();
+          return;
+        }
+      }
+
+      // Ctrl+V — paste node (guarded against input/textarea focus)
+      if (
+        isMod &&
+        e.key === "v" &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target instanceof HTMLSelectElement)
+      ) {
+        e.preventDefault();
+        pasteNode();
+        return;
+      }
+
       // Ctrl+Z — undo
       if (isMod && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
@@ -116,5 +146,7 @@ export function useKeyboardShortcuts() {
     triggerFitView,
     undo,
     redo,
+    copyNode,
+    pasteNode,
   ]);
 }

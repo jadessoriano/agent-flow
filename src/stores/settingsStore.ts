@@ -15,6 +15,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   settings: {
     claude_cli_path: null,
     theme: "dark",
+    notifications_enabled: true,
   },
   loading: false,
 

@@ -24,6 +24,7 @@ const colorMap: Record<NodeType, { border: string; bg: string; badge: string; ic
   "parallel":       { border: "border-blue-400/60",   bg: "bg-blue-500/15",   badge: "bg-blue-500", icon: "text-blue-400", glow: "shadow-blue-500/10" },
   "approval-gate":  { border: "border-amber-400/60", bg: "bg-amber-500/15", badge: "bg-amber-500", icon: "text-amber-400", glow: "shadow-amber-500/10" },
   "sub-pipeline":   { border: "border-cyan-400/60",   bg: "bg-cyan-500/15",   badge: "bg-cyan-500", icon: "text-cyan-400", glow: "shadow-cyan-500/10" },
+  "comment":        { border: "border-yellow-400/40", bg: "bg-yellow-500/10", badge: "bg-yellow-500", icon: "text-yellow-400", glow: "shadow-yellow-500/10" },
 };
 
 export default function BaseNode({ data, selected }: NodeProps) {
@@ -43,18 +44,22 @@ export default function BaseNode({ data, selected }: NodeProps) {
           ? "ring-2 ring-yellow-400/50"
           : "";
 
+  const isComment = nodeType === "comment";
+
   return (
     <div
-      className={`min-w-[180px] max-w-[240px] rounded-lg border ${colors.border} ${colors.bg} shadow-lg ${colors.glow} ${
+      className={`${isComment ? "min-w-[220px] max-w-[300px]" : "min-w-[180px] max-w-[240px]"} rounded-lg border ${colors.border} ${colors.bg} shadow-lg ${colors.glow} ${
         selected && !runStatus ? "ring-2 ring-violet-400/70 shadow-xl shadow-violet-500/25" : ""
       } ${runStatusRing}`}
     >
       {/* Input handle */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!h-3 !w-3 !border-2 !border-zinc-500 !bg-zinc-700 hover:!border-zinc-400 hover:!bg-zinc-600"
-      />
+      {!isComment && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!h-3 !w-3 !border-2 !border-zinc-500 !bg-zinc-700 hover:!border-zinc-400 hover:!bg-zinc-600"
+        />
+      )}
 
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2">
@@ -130,11 +135,13 @@ export default function BaseNode({ data, selected }: NodeProps) {
       )}
 
       {/* Output handle */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-3 !w-3 !border-2 !border-zinc-500 !bg-zinc-700 hover:!border-zinc-400 hover:!bg-zinc-600"
-      />
+      {!isComment && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!h-3 !w-3 !border-2 !border-zinc-500 !bg-zinc-700 hover:!border-zinc-400 hover:!bg-zinc-600"
+        />
+      )}
     </div>
   );
 }

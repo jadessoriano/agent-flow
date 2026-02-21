@@ -105,14 +105,81 @@ export default function Settings() {
         )}
       </div>
 
-      {/* Theme (read-only for now) */}
+      {/* Theme */}
       <div>
         <label className="mb-1.5 block text-sm font-medium text-zinc-300">
           Theme
         </label>
-        <div className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-400">
-          Dark (only option for now)
+        <select
+          value={settings.theme}
+          onChange={(e) => {
+            const updated = { ...settings, theme: e.target.value };
+            updateSettings(updated);
+          }}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+          style={{ colorScheme: "dark" }}
+        >
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+
+      {/* Notifications */}
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-zinc-300">
+          Desktop Notifications
+        </label>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              const updated = {
+                ...settings,
+                notifications_enabled: !settings.notifications_enabled,
+              };
+              updateSettings(updated);
+            }}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+              settings.notifications_enabled ? "bg-violet-600" : "bg-zinc-700"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                settings.notifications_enabled ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+          <span className="text-sm text-zinc-400">
+            {settings.notifications_enabled ? "Enabled" : "Disabled"}
+          </span>
         </div>
+        <p className="mt-1 text-xs text-zinc-500">
+          Get notified when pipelines complete or need approval
+        </p>
+      </div>
+
+      {/* Check for Updates */}
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-zinc-300">
+          Updates
+        </label>
+        <button
+          onClick={async () => {
+            try {
+              const { checkForUpdate } = await import("../../lib/updater");
+              const info = await checkForUpdate();
+              if (info) {
+                addToast(`Update available: v${info.version}`, "info");
+              } else {
+                addToast("You're on the latest version", "info");
+              }
+            } catch {
+              addToast("Could not check for updates", "warning");
+            }
+          }}
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
+        >
+          Check for Updates
+        </button>
       </div>
 
       {/* Save */}

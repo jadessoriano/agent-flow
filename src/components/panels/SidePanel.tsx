@@ -31,14 +31,14 @@ export default function SidePanel() {
 
   return (
     <div
-      className={`absolute top-0 right-0 h-full border-l border-zinc-700/70 bg-zinc-900 shadow-xl transition-[width] duration-200 ${
+      className={`absolute top-0 right-0 h-full border-l border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl transition-[width] duration-200 ${
         panelOpen ? "w-96" : "w-0 overflow-hidden border-l-0"
       }`}
     >
       {panelOpen && (
         <div className="flex h-full flex-col">
           {/* Panel header */}
-          <div className="flex h-10 items-center justify-between border-b border-zinc-700/70 px-4">
+          <div className="flex h-10 items-center justify-between border-b border-[var(--border)] px-4">
             <span className="text-sm font-medium text-zinc-200">{title}</span>
             <button
               onClick={closePanel}

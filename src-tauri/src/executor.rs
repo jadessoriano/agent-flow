@@ -481,6 +481,7 @@ async fn execute_node(
                     (NodeStatus::Failed, Some(1), None)
                 }
             }
+            "comment" => (NodeStatus::Skipped, Some(0), None),
             "sub-pipeline" | "parallel" => (NodeStatus::Success, Some(0), None),
             _ => (NodeStatus::Success, Some(0), None),
         };

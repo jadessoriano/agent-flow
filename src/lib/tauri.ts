@@ -213,3 +213,23 @@ export async function getLogPath(): Promise<string> {
 export async function clearErrorLog(): Promise<void> {
   return invoke("clear_error_log");
 }
+
+// Secrets
+export async function listSecrets(projectPath: string): Promise<string[]> {
+  return invoke("list_secrets", { projectPath });
+}
+
+export async function setSecret(
+  projectPath: string,
+  key: string,
+  value: string,
+): Promise<void> {
+  return invoke("set_secret", { projectPath, key, value });
+}
+
+export async function deleteSecret(
+  projectPath: string,
+  key: string,
+): Promise<void> {
+  return invoke("delete_secret", { projectPath, key });
+}

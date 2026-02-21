@@ -10,6 +10,7 @@ const nodeTypes: NodeType[] = [
   "parallel",
   "approval-gate",
   "sub-pipeline",
+  "comment",
 ];
 
 const iconColors: Record<NodeType, string> = {
@@ -19,6 +20,7 @@ const iconColors: Record<NodeType, string> = {
   "parallel": "text-blue-400",
   "approval-gate": "text-amber-400",
   "sub-pipeline": "text-cyan-400",
+  "comment": "text-yellow-400",
 };
 
 const previewColors: Record<NodeType, { border: string; bg: string; icon: string }> = {
@@ -28,6 +30,7 @@ const previewColors: Record<NodeType, { border: string; bg: string; icon: string
   "parallel":      { border: "border-blue-400/60", bg: "bg-blue-500/15", icon: "text-blue-400" },
   "approval-gate": { border: "border-amber-400/60", bg: "bg-amber-500/15", icon: "text-amber-400" },
   "sub-pipeline":  { border: "border-cyan-400/60", bg: "bg-cyan-500/15", icon: "text-cyan-400" },
+  "comment":       { border: "border-yellow-400/40", bg: "bg-yellow-500/10", icon: "text-yellow-400" },
 };
 
 interface NodePaletteProps {

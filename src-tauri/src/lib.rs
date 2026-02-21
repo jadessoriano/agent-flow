@@ -5,6 +5,7 @@ mod executor;
 mod git_watcher;
 mod pipeline_engine;
 mod project_manager;
+mod secrets;
 mod settings;
 
 use std::sync::Mutex;
@@ -17,6 +18,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Mutex::new(git_watcher::WatcherState { _watcher: None }))
         .manage(TokioMutex::new(executor::ExecutorState::new()))
         .invoke_handler(tauri::generate_handler![
@@ -59,6 +62,10 @@ pub fn run() {
             // File watcher
             git_watcher::start_watching,
             git_watcher::stop_watching,
+            // Secrets
+            secrets::list_secrets,
+            secrets::set_secret,
+            secrets::delete_secret,
             // Error log
             error_log::get_error_log,
             error_log::get_full_log,

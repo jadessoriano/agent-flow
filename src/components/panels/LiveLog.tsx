@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRunStore } from "../../stores/runStore";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -41,6 +41,26 @@ export default function LiveLog() {
   const settings = useSettingsStore((s) => s.settings);
   const currentProject = useProjectStore((s) => s.currentProject);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (nodeId: string) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  };
+
+  const handleExport = async () => {
+    if (!runState) return;
+    const { generateRunReport } = await import("../../lib/exportReport");
+    const report = generateRunReport(runState, logs, currentPipeline);
+    await navigator.clipboard.writeText(report);
+  };
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -127,6 +147,15 @@ export default function LiveLog() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {!running && runState.status !== "running" && (
+              <button
+                onClick={handleExport}
+                className="rounded bg-zinc-700/50 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                title="Copy run report to clipboard"
+              >
+                Export
+              </button>
+            )}
             {runState.status === "failed" && !running && (
               <button
                 onClick={handleResume}
@@ -189,14 +218,23 @@ export default function LiveLog() {
           const status: NodeStatus = result?.status ?? "Pending";
           const isActive = runState.current_node === nodeId;
 
+          const isExpanded = expandedNodes.has(nodeId);
+          const hasDetails = result || nodeLogs.length > 0;
+
           return (
             <div key={nodeId} className="border-b border-zinc-800">
-              {/* Node header */}
+              {/* Node header - clickable to expand */}
               <div
+                onClick={() => hasDetails && toggleExpanded(nodeId)}
                 className={`flex items-center gap-2 px-4 py-2 ${
                   isActive ? "bg-zinc-800/50" : ""
-                }`}
+                } ${hasDetails ? "cursor-pointer hover:bg-zinc-800/30" : ""}`}
               >
+                {hasDetails && (
+                  <span className="text-[10px] text-zinc-600">
+                    {isExpanded ? "\u25BC" : "\u25B6"}
+                  </span>
+                )}
                 <span
                   className={`text-sm ${statusColors[status]} ${
                     status === "Running" ? "animate-pulse" : ""
@@ -230,13 +268,29 @@ export default function LiveLog() {
                 )}
               </div>
 
-              {/* Log output */}
-              {nodeLogs.length > 0 && (
-                <div className="bg-zinc-950 px-4 py-2">
-                  <pre className="max-h-40 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-400">
-                    {nodeLogs.join("\n")}
-                  </pre>
-                </div>
+              {/* Expanded details */}
+              {isExpanded && (
+                <>
+                  {/* Structured output */}
+                  {result?.output && (
+                    <div className="bg-zinc-900/50 px-4 py-2">
+                      <div className="mb-1 text-[10px] font-medium uppercase text-zinc-500">Output</div>
+                      <pre className="max-h-32 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-300">
+                        {result.output}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Log output */}
+                  {nodeLogs.length > 0 && (
+                    <div className="bg-zinc-950 px-4 py-2">
+                      <div className="mb-1 text-[10px] font-medium uppercase text-zinc-500">Logs</div>
+                      <pre className="max-h-60 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-400">
+                        {nodeLogs.join("\n")}
+                      </pre>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );

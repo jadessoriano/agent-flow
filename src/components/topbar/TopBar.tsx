@@ -10,6 +10,7 @@ import PipelineSelector from "./PipelineSelector";
 import AboutModal from "../AboutModal";
 import InputPrompt from "../modals/InputPrompt";
 import GeneratePrompt from "../modals/GeneratePrompt";
+import DiffModal from "../modals/DiffModal";
 
 export default function TopBar() {
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -33,6 +34,8 @@ export default function TopBar() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [inputPromptOpen, setInputPromptOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const savedPipeline = usePipelineStore((s) => s.savedPipeline);
   const loadGeneratedPipeline = usePipelineStore((s) => s.loadGeneratedPipeline);
   const switcherRef = useRef<HTMLDivElement>(null);
 
@@ -67,11 +70,33 @@ export default function TopBar() {
     }
   };
 
-  const handleRunClick = () => {
+  const handleRunClick = async () => {
     if (!currentPipeline || !currentProject) return;
     if (running) {
       cancelRun();
       return;
+    }
+    // Validate pipeline before running
+    try {
+      const { validatePipeline } = await import("../../lib/validatePipeline");
+      const errors = validatePipeline(currentPipeline);
+      const blockers = errors.filter((e) => e.severity === "error");
+      const warnings = errors.filter((e) => e.severity === "warning");
+      if (blockers.length > 0) {
+        addToast(
+          `Pipeline has ${blockers.length} error(s): ${blockers[0].message}`,
+          "error",
+        );
+        return;
+      }
+      if (warnings.length > 0) {
+        addToast(
+          `${warnings.length} warning(s): ${warnings[0].message}`,
+          "warning",
+        );
+      }
+    } catch {
+      // Validation import failed — proceed anyway
     }
     // Always show the modal for cost visibility
     setInputPromptOpen(true);
@@ -107,7 +132,7 @@ export default function TopBar() {
   }, [currentProject, currentPipeline, savePipeline]);
 
   return (
-    <div className="flex h-12 items-center justify-between border-b border-zinc-700/70 bg-zinc-900 px-4">
+    <div className="flex h-12 items-center justify-between border-b border-[var(--border)] bg-[var(--bg-secondary)] px-4">
       {/* Left: Project Switcher */}
       <div className="flex items-center gap-3" ref={switcherRef}>
         <div className="relative">
@@ -145,7 +170,7 @@ export default function TopBar() {
           </button>
 
           {switcherOpen && (
-            <div className="absolute top-full left-0 z-50 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-850 shadow-xl">
+            <div className="absolute top-full left-0 z-50 mt-1 w-64 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl">
               <div className="p-2">
                 <button
                   onClick={handleOpenProject}
@@ -266,12 +291,23 @@ export default function TopBar() {
           </div>
         )}
         {currentPipeline && dirty && (
-          <button
-            onClick={handleSave}
-            className="rounded bg-violet-600 px-3 py-1 text-sm text-white hover:bg-violet-500"
-          >
-            Save
-          </button>
+          <>
+            {savedPipeline && (
+              <button
+                onClick={() => setDiffOpen(true)}
+                className="rounded bg-zinc-700/50 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                title="Review changes before saving"
+              >
+                Review
+              </button>
+            )}
+            <button
+              onClick={handleSave}
+              className="rounded bg-violet-600 px-3 py-1 text-sm text-white hover:bg-violet-500"
+            >
+              Save
+            </button>
+          </>
         )}
         <button
           disabled={!currentPipeline}
@@ -352,6 +388,14 @@ export default function TopBar() {
         }}
         onCancel={() => setGenerateOpen(false)}
       />
+      {savedPipeline && currentPipeline && (
+        <DiffModal
+          open={diffOpen}
+          onClose={() => setDiffOpen(false)}
+          saved={savedPipeline}
+          current={currentPipeline}
+        />
+      )}
     </div>
   );
 }

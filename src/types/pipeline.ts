@@ -4,7 +4,18 @@ export type NodeType =
   | "git"
   | "parallel"
   | "approval-gate"
-  | "sub-pipeline";
+  | "sub-pipeline"
+  | "comment";
+
+export interface ValidationError {
+  nodeId?: string;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export interface SecretInfo {
+  name: string;
+}
 
 export interface RetryPolicy {
   max: number;
@@ -72,5 +83,10 @@ export const NODE_TYPE_META: Record<
     label: "Sub-pipeline",
     color: "#06b6d4",
     icon: "workflow",
+  },
+  comment: {
+    label: "Comment",
+    color: "#a1a1aa",
+    icon: "message",
   },
 };

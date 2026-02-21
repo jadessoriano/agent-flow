@@ -4,10 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{AppHandle, Manager};
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub claude_cli_path: Option<String>,
     pub theme: String,
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -15,6 +21,7 @@ impl Default for AppSettings {
         Self {
             claude_cli_path: None,
             theme: "dark".to_string(),
+            notifications_enabled: true,
         }
     }
 }
