@@ -1,7 +1,7 @@
 {
   "name": "Test: Memory Stress",
-  "description": "Quick-running pipeline for memory testing. Run this 5-10 times, switch between pipelines, drag nodes, undo/redo, then check JS heap via devtools: performance.memory.usedJSHeapSize / 1024 / 1024",
-  "version": "1.0.0",
+  "description": "Quick-running pipeline for memory testing with loop nodes. Run this 5-10 times, switch between pipelines, drag nodes, undo/redo, then check JS heap via devtools: performance.memory.usedJSHeapSize / 1024 / 1024",
+  "version": "1.1.0",
   "variables": {},
   "nodes": [
     {
@@ -20,6 +20,42 @@
       }
     },
     {
+      "id": "mem-loop",
+      "name": "Loop Items",
+      "type": "loop",
+      "instructions": "{output.mem-step1}",
+      "inputs": [],
+      "outputs": [
+        "loop_results"
+      ],
+      "children": [
+        "mem-loop-child"
+      ],
+      "cache": false,
+      "loop_separator": "newline",
+      "max_iterations": 50,
+      "loop_timeout": 120,
+      "position": {
+        "x": 390.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "mem-loop-child",
+      "name": "Process Item",
+      "type": "shell",
+      "instructions": "echo \"[iter $LOOP_INDEX/$LOOP_COUNT] Processing: $LOOP_ITEM\" && echo \"hash=$(echo $LOOP_ITEM | md5sum | cut -d' ' -f1)\"",
+      "inputs": [],
+      "outputs": [
+        "item_result"
+      ],
+      "cache": false,
+      "position": {
+        "x": 55.0,
+        "y": 350.0
+      }
+    },
+    {
       "id": "mem-step2",
       "name": "Process A",
       "type": "shell",
@@ -30,8 +66,8 @@
       ],
       "cache": false,
       "position": {
-        "x": 360.0,
-        "y": 320.0
+        "x": 390.0,
+        "y": 180.0
       }
     },
     {
@@ -45,22 +81,7 @@
       ],
       "cache": false,
       "position": {
-        "x": 360.0,
-        "y": 180.0
-      }
-    },
-    {
-      "id": "mem-step4",
-      "name": "Process C",
-      "type": "shell",
-      "instructions": "echo 'Processing branch C...' && for i in $(seq 1 100); do echo \"[C-$i] processed\"; done && echo 'Branch C complete.'",
-      "inputs": [],
-      "outputs": [
-        "result_c"
-      ],
-      "cache": false,
-      "position": {
-        "x": 360.0,
+        "x": 390.0,
         "y": 40.0
       }
     },
@@ -68,18 +89,18 @@
       "id": "mem-step5",
       "name": "Merge Results",
       "type": "shell",
-      "instructions": "echo 'Merging A + B + C...' && sleep 1 && echo 'Merge complete. Total records: 300'",
+      "instructions": "echo 'Merging loop results + A + B...' && sleep 1 && echo 'Merge complete. Loop items processed, plus 200 branch records.'",
       "inputs": [
+        "loop_results",
         "result_a",
-        "result_b",
-        "result_c"
+        "result_b"
       ],
       "outputs": [
         "merged"
       ],
       "cache": false,
       "position": {
-        "x": 680.0,
+        "x": 740.0,
         "y": 180.0
       }
     },
@@ -94,7 +115,7 @@
       "outputs": [],
       "cache": false,
       "position": {
-        "x": 1000.0,
+        "x": 1090.0,
         "y": 180.0
       }
     }
@@ -103,31 +124,31 @@
     {
       "id": "e1",
       "from": "mem-step1",
-      "to": "mem-step2"
+      "to": "mem-loop"
     },
     {
       "id": "e2",
       "from": "mem-step1",
-      "to": "mem-step3"
+      "to": "mem-step2"
     },
     {
       "id": "e3",
       "from": "mem-step1",
-      "to": "mem-step4"
+      "to": "mem-step3"
     },
     {
       "id": "e4",
-      "from": "mem-step2",
+      "from": "mem-loop",
       "to": "mem-step5"
     },
     {
       "id": "e5",
-      "from": "mem-step3",
+      "from": "mem-step2",
       "to": "mem-step5"
     },
     {
       "id": "e6",
-      "from": "mem-step4",
+      "from": "mem-step3",
       "to": "mem-step5"
     },
     {

@@ -3,6 +3,7 @@ export type NodeType =
   | "shell"
   | "git"
   | "parallel"
+  | "loop"
   | "approval-gate"
   | "sub-pipeline"
   | "comment";
@@ -33,9 +34,13 @@ export interface PipelineNode {
   retry?: RetryPolicy;
   timeout?: number;
   children?: string[];
+  loop_separator?: string;
+  max_iterations?: number;
+  loop_timeout?: number;
   pipeline_ref?: string;
   requires_tools?: string[];
   model?: string;
+  loop_model?: string;
   cache?: boolean;
   position: { x: number; y: number };
 }
@@ -79,6 +84,7 @@ export const NODE_TYPE_META: Record<
   shell: { label: "Shell", color: "#22c55e", icon: "terminal" },
   git: { label: "Git", color: "#f97316", icon: "git" },
   parallel: { label: "Parallel", color: "#3b82f6", icon: "layers" },
+  loop: { label: "Loop", color: "#ec4899", icon: "loop" },
   "approval-gate": {
     label: "Approval Gate",
     color: "#eab308",

@@ -6,41 +6,100 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 
+export interface NodeRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface ConditionalEdgeData {
   condition?: string;
+  synthetic?: boolean;
+  synthLabel?: string;
+  synthColor?: string;
+  graphMidY?: number;
+  nodeRects?: NodeRect[];
+  /**
+   * Pre-computed routing offset from central lane assignment.
+   * Negative = route above, positive = route below, 0 = default bezier.
+   */
+  routeOffset?: number;
+  /** When true, always draw a direct bezier — skip backward edge detection */
+  directPath?: boolean;
+  dimmed?: boolean;
   [key: string]: unknown;
 }
 
 /**
  * Build a looping path for backward edges (source is to the right of target).
- * Routes the edge above both nodes so it doesn't cut through them.
+ * Uses the routeOffset to determine direction and magnitude of the arc.
  */
 function getBackwardEdgePath(
   sourceX: number,
   sourceY: number,
   targetX: number,
   targetY: number,
+  routeOffset: number,
 ): [string, number, number] {
   const dx = Math.abs(sourceX - targetX);
   const dy = Math.abs(sourceY - targetY);
   const offset = Math.max(50, dx * 0.3);
-  const loopHeight = Math.max(80, dy * 0.5 + 60);
+  const baseLoopHeight = Math.max(80, dy * 0.5 + 60);
 
-  // Top of the loop — label goes here
-  const topY = Math.min(sourceY, targetY) - loopHeight;
   const midX = (sourceX + targetX) / 2;
+  const magnitude = Math.abs(routeOffset);
+  const loopHeight = baseLoopHeight + magnitude;
+
+  let arcY: number;
+  if (routeOffset > 0) {
+    // Route below
+    arcY = Math.max(sourceY, targetY) + loopHeight;
+  } else {
+    // Route above (default)
+    arcY = Math.min(sourceY, targetY) - loopHeight;
+  }
 
   const path = [
     `M ${sourceX},${sourceY}`,
     `C ${sourceX + offset},${sourceY}`,
-    `  ${sourceX + offset},${topY}`,
-    `  ${midX},${topY}`,
-    `C ${targetX - offset},${topY}`,
+    `  ${sourceX + offset},${arcY}`,
+    `  ${midX},${arcY}`,
+    `C ${targetX - offset},${arcY}`,
     `  ${targetX - offset},${targetY}`,
     `  ${targetX},${targetY}`,
   ].join(" ");
 
-  return [path, midX, topY];
+  return [path, midX, arcY];
+}
+
+/**
+ * Build a custom bezier for forward edges that need to avoid obstacles.
+ * Uses routeOffset to curve the edge above or below the straight path.
+ */
+function getAvoidancePath(
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  routeOffset: number,
+): [string, number, number] {
+  const midX = (sourceX + targetX) / 2;
+  const midY = (sourceY + targetY) / 2;
+  const cpY = midY + routeOffset;
+  const dx = Math.abs(targetX - sourceX);
+  const cpSpread = Math.max(60, dx * 0.25);
+
+  const path = [
+    `M ${sourceX},${sourceY}`,
+    `C ${sourceX + cpSpread},${sourceY}`,
+    `  ${midX},${cpY}`,
+    `  ${midX},${cpY}`,
+    `S ${targetX - cpSpread},${targetY}`,
+    `  ${targetX},${targetY}`,
+  ].join(" ");
+
+  return [path, midX, cpY];
 }
 
 function ConditionalEdge({
@@ -56,24 +115,43 @@ function ConditionalEdge({
 }: EdgeProps) {
   const edgeData = data as ConditionalEdgeData | undefined;
   const condition = edgeData?.condition;
+  const isSynthetic = edgeData?.synthetic === true;
+  const routeOffset = edgeData?.routeOffset ?? 0;
 
   // Detect backward edge: source is to the right of (or very close to) target
-  const isBackward = sourceX > targetX - 20;
+  // directPath edges (reversed synthetic edges) skip backward detection
+  const isBackward = !edgeData?.directPath && sourceX > targetX - 20;
 
-  const [edgePath, labelX, labelY] = isBackward
-    ? getBackwardEdgePath(sourceX, sourceY, targetX, targetY)
-    : getBezierPath({
-        sourceX,
-        sourceY,
-        sourcePosition,
-        targetX,
-        targetY,
-        targetPosition,
-      });
+  let edgePath: string;
+  let labelX: number;
+  let labelY: number;
 
-  let strokeColor = "#71717a"; // zinc-500
-  if (condition === "success") strokeColor = "#22c55e";
-  if (condition === "failure") strokeColor = "#ef4444";
+  if (isBackward) {
+    [edgePath, labelX, labelY] = getBackwardEdgePath(
+      sourceX, sourceY, targetX, targetY, routeOffset,
+    );
+  } else if (routeOffset !== 0) {
+    [edgePath, labelX, labelY] = getAvoidancePath(
+      sourceX, sourceY, targetX, targetY, routeOffset,
+    );
+  } else {
+    [edgePath, labelX, labelY] = getBezierPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
+    });
+  }
+
+  let strokeColor = isSynthetic
+    ? (edgeData?.synthColor ?? "#ec4899")
+    : "#71717a"; // zinc-500
+  if (!isSynthetic) {
+    if (condition === "success") strokeColor = "#22c55e";
+    if (condition === "failure") strokeColor = "#ef4444";
+  }
 
   const arrowColor = selected ? "#a78bfa" : strokeColor;
   const markerId = `af-arrow-${id}`;
@@ -107,7 +185,9 @@ function ConditionalEdge({
         markerEnd={`url(#${markerId})`}
         style={{
           stroke: arrowColor,
-          strokeWidth: selected ? 2.5 : 2,
+          strokeWidth: selected ? 2.5 : isSynthetic ? 1.5 : 2,
+          strokeDasharray: isSynthetic ? "6,4" : undefined,
+          opacity: isSynthetic ? 0.7 : 1,
         }}
       />
       <EdgeLabelRenderer>
@@ -115,9 +195,18 @@ function ConditionalEdge({
           className="nodrag nopan pointer-events-auto absolute"
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            opacity: edgeData?.dimmed ? 0.1 : undefined,
+            transition: "opacity 0.35s ease-in-out",
           }}
         >
-          {condition ? (
+          {isSynthetic && edgeData?.synthLabel ? (
+            <span
+              className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+              style={{ backgroundColor: `${strokeColor}20`, color: strokeColor }}
+            >
+              {edgeData.synthLabel}
+            </span>
+          ) : condition ? (
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                 condition === "success"
@@ -140,15 +229,23 @@ function ConditionalEdge({
   );
 }
 
-export default memo(ConditionalEdge, (prev, next) =>
-  prev.id === next.id &&
-  prev.sourceX === next.sourceX &&
-  prev.sourceY === next.sourceY &&
-  prev.targetX === next.targetX &&
-  prev.targetY === next.targetY &&
-  prev.sourcePosition === next.sourcePosition &&
-  prev.targetPosition === next.targetPosition &&
-  (prev.data as ConditionalEdgeData | undefined)?.condition ===
-    (next.data as ConditionalEdgeData | undefined)?.condition &&
-  prev.selected === next.selected
-);
+export default memo(ConditionalEdge, (prev, next) => {
+  const pd = prev.data as ConditionalEdgeData | undefined;
+  const nd = next.data as ConditionalEdgeData | undefined;
+  return (
+    prev.id === next.id &&
+    prev.sourceX === next.sourceX &&
+    prev.sourceY === next.sourceY &&
+    prev.targetX === next.targetX &&
+    prev.targetY === next.targetY &&
+    prev.sourcePosition === next.sourcePosition &&
+    prev.targetPosition === next.targetPosition &&
+    pd?.condition === nd?.condition &&
+    pd?.synthetic === nd?.synthetic &&
+    pd?.synthLabel === nd?.synthLabel &&
+    pd?.routeOffset === nd?.routeOffset &&
+    pd?.directPath === nd?.directPath &&
+    pd?.dimmed === nd?.dimmed &&
+    prev.selected === next.selected
+  );
+});

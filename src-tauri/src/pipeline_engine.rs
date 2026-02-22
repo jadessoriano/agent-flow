@@ -46,6 +46,14 @@ pub struct PipelineNode {
     pub model: Option<String>,
     #[serde(default)]
     pub cache: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_separator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_iterations: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_timeout: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_model: Option<String>,
     pub position: Position,
 }
 

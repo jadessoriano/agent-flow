@@ -31,10 +31,10 @@ export default function InputPrompt({
   const rootInputKeys = (() => {
     if (!pipeline) return [];
     const targetNodeIds = new Set(pipeline.edges.map((e) => e.to));
-    // Collect all child IDs of parallel groups — they're implicitly connected
+    // Collect all child IDs of parallel/loop groups — they're implicitly connected
     const parallelChildIds = new Set<string>();
     for (const node of pipeline.nodes) {
-      if (node.type === "parallel" && node.children) {
+      if ((node.type === "parallel" || node.type === "loop") && node.children) {
         for (const cid of node.children) parallelChildIds.add(cid);
       }
     }

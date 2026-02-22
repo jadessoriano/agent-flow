@@ -184,6 +184,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
         .await
         .map_err(|e| format!("Migration failed (idx_runs_pipeline_name): {}", e))?;
 
+    // Add loop iteration columns (safe to run on existing DBs)
+    let _ = sqlx::query("ALTER TABLE run_steps ADD COLUMN iteration_index INTEGER")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE run_steps ADD COLUMN loop_parent_id TEXT")
+        .execute(pool)
+        .await;
+
     Ok(())
 }
 
@@ -381,11 +389,13 @@ pub async fn insert_complete_run_step(
     cost_usd: Option<f64>,
     model: Option<&str>,
     approval_state: Option<&str>,
+    iteration_index: Option<i32>,
+    loop_parent_id: Option<&str>,
 ) -> Result<i64, String> {
     let now = chrono::Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO run_steps (run_id, node_id, node_name, started_at, finished_at, status, attempt, instructions_hash, exit_code, log_output, cost_usd, model, approval_state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO run_steps (run_id, node_id, node_name, started_at, finished_at, status, attempt, instructions_hash, exit_code, log_output, cost_usd, model, approval_state, iteration_index, loop_parent_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(run_id)
     .bind(node_id)
@@ -400,6 +410,8 @@ pub async fn insert_complete_run_step(
     .bind(cost_usd)
     .bind(model)
     .bind(approval_state)
+    .bind(iteration_index)
+    .bind(loop_parent_id)
     .execute(pool)
     .await
     .map_err(|e| format!("insert_complete_run_step failed: {}", e))?;
@@ -656,6 +668,53 @@ pub async fn find_cached_step(
         let cost: Option<f64> = r.get("cost_usd");
         (output, cost)
     }))
+}
+
+pub struct RunStepInsert {
+    pub run_id: String,
+    pub node_id: String,
+    pub node_name: String,
+    pub status: String,
+    pub attempt: i32,
+    pub instructions_hash: String,
+    pub exit_code: Option<i32>,
+    pub log_output: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub model: Option<String>,
+    pub approval_state: Option<String>,
+    pub iteration_index: Option<i32>,
+    pub loop_parent_id: Option<String>,
+}
+
+pub async fn insert_run_steps_batch(pool: &SqlitePool, steps: &[RunStepInsert]) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| format!("begin tx failed: {}", e))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for step in steps {
+        sqlx::query(
+            "INSERT INTO run_steps (run_id, node_id, node_name, started_at, finished_at, status, attempt, instructions_hash, exit_code, log_output, cost_usd, model, approval_state, iteration_index, loop_parent_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&step.run_id)
+        .bind(&step.node_id)
+        .bind(&step.node_name)
+        .bind(&now)
+        .bind(&now)
+        .bind(&step.status)
+        .bind(step.attempt)
+        .bind(&step.instructions_hash)
+        .bind(step.exit_code)
+        .bind(step.log_output.as_deref())
+        .bind(step.cost_usd)
+        .bind(step.model.as_deref())
+        .bind(step.approval_state.as_deref())
+        .bind(step.iteration_index)
+        .bind(step.loop_parent_id.as_deref())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("batch insert failed: {}", e))?;
+    }
+    tx.commit().await.map_err(|e| format!("commit tx failed: {}", e))?;
+    Ok(())
 }
 
 pub async fn get_avg_ai_step_cost(pool: &SqlitePool) -> Result<Option<f64>, String> {

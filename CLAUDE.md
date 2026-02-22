@@ -65,6 +65,26 @@ npx tsc --noEmit         # Type-check frontend
 cd src-tauri && cargo check  # Type-check backend
 ```
 
+## Node Types
+
+All node types are defined in `src/types/pipeline.ts` (`NODE_TYPE_META`):
+
+- **ai-task** — Run a prompt with Claude CLI
+- **shell** — Execute a shell command
+- **git** — Git operations
+- **parallel** — Run children simultaneously
+- **loop** — Iterate over items, running children per item (supports `$LOOP_ITEM`, `$LOOP_INDEX`, `$LOOP_COUNT`)
+- **approval-gate** — Pause for manual approval
+- **sub-pipeline** — Reference another pipeline
+- **comment** — Annotation node (no execution)
+
+## Canvas Features
+
+- **Edge routing**: Backward edges and edges blocked by intermediate nodes are auto-rerouted via lane assignment (`computeRouteOffsets` in `Canvas.tsx`)
+- **Synthetic edges**: Loop/parallel parent→child connections are auto-generated dashed edges. Handle selection is position-aware (closest pair of left/right handles)
+- **Hover focus**: Hovering a node highlights it + parent + children + siblings + direct edge neighbors; all other nodes/edges dim. Uses `af-dimmed`/`af-highlighted` CSS classes
+- **Handle styling**: Connected handles (`af-handle-connected`), unconnected (`af-handle-subtle`), and group child handles (`af-handle-child`) have distinct visual states defined in `globals.css`
+
 ## Conventions
 
 - Node types are defined in `src/types/pipeline.ts` (`NODE_TYPE_META`)

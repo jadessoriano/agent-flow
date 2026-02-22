@@ -15,6 +15,60 @@ import type { Pipeline } from "../types/pipeline";
 let approvalTimer: ReturnType<typeof setTimeout> | null = null;
 let historyDebounce: ReturnType<typeof setTimeout> | null = null;
 
+/* ── Log throttle buffer ── */
+const LOG_FLUSH_INTERVAL = 100; // ms
+const MAX_LOG_LINES = 2000;
+let logBuffer: Record<string, string[]> = {};
+let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushLogBuffer() {
+  if (logFlushTimer) {
+    clearTimeout(logFlushTimer);
+    logFlushTimer = null;
+  }
+  const buf = logBuffer;
+  // Check if buffer has any entries
+  let hasEntries = false;
+  for (const _k in buf) { hasEntries = true; break; }
+  if (!hasEntries) return;
+  logBuffer = {};
+
+  useRunStore.setState((s) => {
+    const newLogs = { ...s.logs };
+    for (const [nodeId, lines] of Object.entries(buf)) {
+      const existing = newLogs[nodeId] || [];
+      const merged = existing.concat(lines);
+      newLogs[nodeId] = merged.length > MAX_LOG_LINES
+        ? merged.slice(-MAX_LOG_LINES)
+        : merged;
+    }
+
+    // Check for loop start cost snapshot in buffered lines
+    let loopUpdate: { loopCostSnapshot: Record<string, number> } | undefined;
+    for (const [nodeId, lines] of Object.entries(buf)) {
+      if (nodeId in s.loopCostSnapshot) continue;
+      for (const line of lines) {
+        const iterMatch = line.match(/^--- Loop iteration 1\/(\d+):/);
+        if (iterMatch) {
+          if (!loopUpdate) {
+            loopUpdate = { loopCostSnapshot: { ...s.loopCostSnapshot } };
+          }
+          loopUpdate.loopCostSnapshot[nodeId] = s.runState?.total_cost_usd ?? 0;
+          break;
+        }
+      }
+    }
+
+    return { logs: newLogs, ...(loopUpdate || {}) };
+  });
+}
+
+function scheduleLogFlush() {
+  if (!logFlushTimer) {
+    logFlushTimer = setTimeout(flushLogBuffer, LOG_FLUSH_INTERVAL);
+  }
+}
+
 /** Strip heavy output strings from a RunState before storing in history. */
 function stripForHistory(state: RunState): RunState {
   const stripped: Record<string, NodeResult> = {};
@@ -34,6 +88,7 @@ interface RunStoreState {
   runHistory: RunState[];
   persistedHistory: RunRow[];
   focusedNodeId: string | null;
+  loopCostSnapshot: Record<string, number>;
 
   startRun: (
     pipeline: Pipeline,
@@ -71,9 +126,12 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   persistedHistory: [],
 
   focusedNodeId: null,
+  loopCostSnapshot: {},
 
   startRun: async (pipeline, inputs, cliPath, projectPath) => {
-    set({ running: true, logs: {}, approvalRequest: null, approvalResponse: null, lastRunInputs: inputs, focusedNodeId: null });
+    logBuffer = {};
+    if (logFlushTimer) { clearTimeout(logFlushTimer); logFlushTimer = null; }
+    set({ running: true, logs: {}, approvalRequest: null, approvalResponse: null, lastRunInputs: inputs, focusedNodeId: null, loopCostSnapshot: {} });
     try {
       await api.startRun(pipeline, inputs, cliPath, projectPath);
     } catch (e) {
@@ -98,7 +156,9 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   },
 
   resumeRun: async (originalRunId, pipeline, inputs, cliPath, projectPath) => {
-    set({ running: true, logs: {}, approvalRequest: null, approvalResponse: null, lastRunInputs: inputs });
+    logBuffer = {};
+    if (logFlushTimer) { clearTimeout(logFlushTimer); logFlushTimer = null; }
+    set({ running: true, logs: {}, approvalRequest: null, approvalResponse: null, lastRunInputs: inputs, loopCostSnapshot: {} });
     try {
       await api.resumeRun(
         originalRunId,
@@ -117,6 +177,7 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
     const isFinished = ["success", "failed", "cancelled", "budget_exceeded"].includes(
       state.status,
     );
+    if (isFinished) flushLogBuffer();
     set((s) => ({
       runState: state,
       running: !isFinished,
@@ -132,6 +193,9 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   },
 
   handleRunDelta: (delta: RunStateDelta) => {
+    if (delta.status && ["success", "failed", "cancelled", "budget_exceeded"].includes(delta.status)) {
+      flushLogBuffer();
+    }
     set((s) => {
       if (!s.runState || s.runState.run_id !== delta.run_id) return {};
       // Mutate node_results in-place to avoid O(N) spread per delta.
@@ -162,36 +226,24 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   },
 
   handleNodeLog: (event: NodeLogEvent) => {
-    const MAX_LOG_LINES = 2000;
-    set((s) => {
-      const existing = s.logs[event.node_id] || [];
-      // Mutate existing array in place to avoid per-line allocation
-      existing.push(event.line);
-      const trimmed = existing.length > MAX_LOG_LINES
-        ? existing.slice(-MAX_LOG_LINES)
-        : existing;
-      return {
-        logs: { ...s.logs, [event.node_id]: trimmed },
-      };
-    });
+    const buf = logBuffer[event.node_id];
+    if (buf) {
+      buf.push(event.line);
+    } else {
+      logBuffer[event.node_id] = [event.line];
+    }
+    scheduleLogFlush();
   },
 
   handleNodeLogBatch: (event: NodeLogBatchEvent) => {
-    const MAX_LOG_LINES = 2000;
     if (event.lines.length === 0) return;
-    set((s) => {
-      const existing = s.logs[event.node_id] || [];
-      // Concat batch in one operation instead of per-line state updates
-      const updated = existing.concat(event.lines);
-      return {
-        logs: {
-          ...s.logs,
-          [event.node_id]: updated.length > MAX_LOG_LINES
-            ? updated.slice(-MAX_LOG_LINES)
-            : updated,
-        },
-      };
-    });
+    const buf = logBuffer[event.node_id];
+    if (buf) {
+      buf.push(...event.lines);
+    } else {
+      logBuffer[event.node_id] = event.lines.slice();
+    }
+    scheduleLogFlush();
   },
 
   handleApprovalRequest: (req: ApprovalRequest) => {

@@ -15,6 +15,12 @@ export interface FlowNodeData {
   pipelineRef?: string;
   costUsd?: number;
   durationStr?: string;
+  groupParentName?: string;
+  groupParentType?: NodeType;
+  /** Which side the parent-child synthetic edge connects to: "left" (default) or "right" */
+  groupParentSide?: "left" | "right";
+  hasIncoming?: boolean;
+  hasOutgoing?: boolean;
   [key: string]: unknown;
 }
 
@@ -23,6 +29,7 @@ const colorMap: Record<NodeType, { border: string; bg: string; badge: string; ic
   "shell":          { border: "border-emerald-400/60", bg: "bg-emerald-500/15", badge: "bg-emerald-500", icon: "text-emerald-400", glow: "shadow-emerald-500/10" },
   "git":            { border: "border-orange-400/60", bg: "bg-orange-500/15", badge: "bg-orange-500", icon: "text-orange-400", glow: "shadow-orange-500/10" },
   "parallel":       { border: "border-blue-400/60",   bg: "bg-blue-500/15",   badge: "bg-blue-500", icon: "text-blue-400", glow: "shadow-blue-500/10" },
+  "loop":           { border: "border-pink-400/60",   bg: "bg-pink-500/15",   badge: "bg-pink-500", icon: "text-pink-400", glow: "shadow-pink-500/10" },
   "approval-gate":  { border: "border-amber-400/60", bg: "bg-amber-500/15", badge: "bg-amber-500", icon: "text-amber-400", glow: "shadow-amber-500/10" },
   "sub-pipeline":   { border: "border-cyan-400/60",   bg: "bg-cyan-500/15",   badge: "bg-cyan-500", icon: "text-cyan-400", glow: "shadow-cyan-500/10" },
   "comment":        { border: "border-yellow-400/40", bg: "bg-yellow-500/10", badge: "bg-yellow-500", icon: "text-yellow-400", glow: "shadow-yellow-500/10" },
@@ -46,20 +53,38 @@ const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
           : "";
 
   const isComment = nodeType === "comment";
+  const isGroupChild = !!nodeData.groupParentName;
+  const parentSide = nodeData.groupParentSide ?? "left";
+  const childOnLeft = isGroupChild && parentSide === "left";
+  const childOnRight = isGroupChild && parentSide === "right";
+  const hasIncoming = nodeData.hasIncoming === true;
+  const hasOutgoing = nodeData.hasOutgoing === true;
 
   return (
     <div
-      className={`${isComment ? "min-w-[220px] max-w-[300px]" : "min-w-[180px] max-w-[240px]"} rounded-lg border ${colors.border} ${colors.bg} shadow-lg ${colors.glow} ${
+      className={`group ${isComment ? "min-w-[220px] max-w-[300px]" : "min-w-[180px] max-w-[240px]"} rounded-lg border ${colors.border} ${colors.bg} shadow-lg ${colors.glow} ${
         selected && !runStatus ? "ring-2 ring-violet-400/70 shadow-xl shadow-violet-500/25" : ""
       } ${runStatusRing}`}
     >
-      {/* Input handle */}
+      {/* Input handle — non-interactive for group children (connected implicitly via parent) */}
       {!isComment && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-3 !w-3 !border-2 !border-zinc-500 !bg-zinc-700 hover:!border-zinc-400 hover:!bg-zinc-600"
-        />
+        <>
+          <Handle
+            type="target"
+            id="left"
+            position={Position.Left}
+            isConnectable={!isGroupChild}
+            className={`af-handle ${childOnLeft ? "af-handle-child" : hasIncoming ? "af-handle-connected" : "af-handle-subtle"}`}
+          />
+          {/* Hidden source handle on left — used by synthetic edges when child is to the left */}
+          <Handle
+            type="source"
+            id="left-out"
+            position={Position.Left}
+            isConnectable={false}
+            className="af-handle-hidden"
+          />
+        </>
       )}
 
       {/* Header */}
@@ -95,6 +120,28 @@ const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.07-9.07l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757" />
             </svg>
             {nodeData.pipelineRef}
+          </div>
+        </div>
+      )}
+
+      {/* Group parent badge (loop/parallel child nodes) */}
+      {nodeData.groupParentName && (
+        <div className="border-t border-zinc-600/30 px-3 py-1">
+          <div className={`flex items-center gap-1 text-[10px] ${
+            nodeData.groupParentType === "loop" ? "text-pink-300" : "text-blue-300"
+          }`}>
+            {nodeData.groupParentType === "loop" ? (
+              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+              </svg>
+            ) : (
+              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            )}
+            {nodeData.groupParentType === "loop"
+              ? `repeats in ${nodeData.groupParentName}`
+              : `runs in ${nodeData.groupParentName}`}
           </div>
         </div>
       )}
@@ -137,11 +184,22 @@ const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
 
       {/* Output handle */}
       {!isComment && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-3 !w-3 !border-2 !border-zinc-500 !bg-zinc-700 hover:!border-zinc-400 hover:!bg-zinc-600"
-        />
+        <>
+          <Handle
+            type="source"
+            id="right"
+            position={Position.Right}
+            className={`af-handle ${childOnRight ? "af-handle-child" : hasOutgoing ? "af-handle-connected" : "af-handle-subtle"}`}
+          />
+          {/* Hidden target handle on right — used by synthetic edges when child is to the left */}
+          <Handle
+            type="target"
+            id="right-in"
+            position={Position.Right}
+            isConnectable={false}
+            className="af-handle-hidden"
+          />
+        </>
       )}
     </div>
   );

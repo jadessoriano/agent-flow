@@ -10,8 +10,16 @@ export function validatePipeline(pipeline: Pipeline): ValidationError[] {
   const errors: ValidationError[] = [];
 
   // 1. Check for disconnected nodes (no incoming or outgoing edges)
+  // Collect nodes that are children of a parallel or loop node (implicitly connected)
+  const childOfGroup = new Set<string>();
+  for (const node of pipeline.nodes) {
+    if ((node.type === "parallel" || node.type === "loop") && node.children?.length) {
+      for (const cid of node.children) childOfGroup.add(cid);
+    }
+  }
   for (const node of pipeline.nodes) {
     if (node.type === "comment") continue; // comments don't need connections
+    if (childOfGroup.has(node.id)) continue; // implicitly connected via parent
     const hasIncoming = pipeline.edges.some((e) => e.to === node.id);
     const hasOutgoing = pipeline.edges.some((e) => e.from === node.id);
     if (!hasIncoming && !hasOutgoing && pipeline.nodes.length > 1) {
@@ -86,7 +94,7 @@ export function validatePipeline(pipeline: Pipeline): ValidationError[] {
     if (pipeline.edges.some((e) => e.from === nodeId)) return true;
     // For parallel groups, check if any child has outgoing edges
     const n = pipeline.nodes.find((nd) => nd.id === nodeId);
-    if (n?.type === "parallel" && n.children?.length) {
+    if ((n?.type === "parallel" || n?.type === "loop") && n.children?.length) {
       return n.children.some((childId) => pipeline.edges.some((e) => e.from === childId));
     }
     return false;

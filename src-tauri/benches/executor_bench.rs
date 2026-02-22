@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use app_lib::executor::{
     build_execution_order, find_back_edges, hash_instructions, hash_pipeline,
-    parse_cost_from_stderr, parse_structured_outputs, should_execute_edge, NodeStatus,
+    parse_cost_from_stderr, parse_structured_outputs, should_execute_edge, split_loop_items,
+    NodeStatus,
 };
 use app_lib::pipeline_engine::{Pipeline, PipelineEdge, PipelineNode, Position};
 
@@ -27,6 +28,8 @@ fn make_node(id: &str, name: &str) -> PipelineNode {
         requires_tools: vec![],
         model: None,
         cache: false,
+        loop_separator: None,
+        max_iterations: None,
         position: Position { x: 0.0, y: 0.0 },
     }
 }
@@ -234,6 +237,99 @@ fn bench_edge_conditions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_split_loop_items(c: &mut Criterion) {
+    let mut group = c.benchmark_group("split_loop_items");
+
+    for count in [10, 100, 1000, 10000] {
+        let source: String = (0..count)
+            .map(|i| format!("item{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        group.bench_with_input(
+            BenchmarkId::new("newline", count),
+            &source,
+            |b, src| {
+                b.iter(|| split_loop_items(black_box(src), None, None));
+            },
+        );
+    }
+
+    // Comma separator variant
+    let comma_source: String = (0..1000)
+        .map(|i| format!("item{}", i))
+        .collect::<Vec<_>>()
+        .join(",");
+    group.bench_function("comma/1000", |b| {
+        b.iter(|| split_loop_items(black_box(&comma_source), Some("comma"), None));
+    });
+
+    group.finish();
+}
+
+fn bench_topology_with_loop(c: &mut Criterion) {
+    let mut group = c.benchmark_group("topology_with_loop");
+
+    for child_count in [5, 25, 100] {
+        let mut loop_node = make_node("loop1", "Loop");
+        loop_node.node_type = "loop".into();
+        let children: Vec<String> = (0..child_count).map(|i| format!("c{}", i)).collect();
+        loop_node.children = Some(children.clone());
+
+        let mut nodes = vec![loop_node];
+        for cid in &children {
+            nodes.push(make_node(cid, cid));
+        }
+
+        let pipeline = Pipeline {
+            name: "loop_bench".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes,
+            edges: vec![],
+            shared_session: true,
+            default_model: None,
+            max_cost_usd: None,
+        };
+
+        group.bench_with_input(
+            BenchmarkId::new("build_execution_order", child_count),
+            &pipeline,
+            |b, p| {
+                b.iter(|| build_execution_order(black_box(p)));
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn bench_loop_variable_clone(c: &mut Criterion) {
+    let mut group = c.benchmark_group("loop_variable_clone");
+
+    for var_count in [5, 20, 50] {
+        let vars: HashMap<String, String> = (0..var_count)
+            .map(|i| (format!("VAR_{}", i), format!("value_{}", i)))
+            .collect();
+
+        group.bench_with_input(
+            BenchmarkId::new("clone_and_insert", var_count),
+            &vars,
+            |b, vars| {
+                b.iter(|| {
+                    let mut cloned = vars.clone();
+                    cloned.insert("LOOP_ITEM".to_string(), "test_item".to_string());
+                    cloned.insert("LOOP_INDEX".to_string(), "0".to_string());
+                    cloned.insert("LOOP_COUNT".to_string(), "10".to_string());
+                    black_box(cloned);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parse_cost,
@@ -241,5 +337,8 @@ criterion_group!(
     bench_topology,
     bench_structured_outputs,
     bench_edge_conditions,
+    bench_split_loop_items,
+    bench_topology_with_loop,
+    bench_loop_variable_clone,
 );
 criterion_main!(benches);

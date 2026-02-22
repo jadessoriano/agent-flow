@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -293,6 +294,32 @@ pub fn parse_structured_outputs(output: &str) -> Option<HashMap<String, String>>
         map.insert(k.clone(), val);
     }
     Some(map)
+}
+
+/// Resolve a named separator (from the frontend dropdown) to its actual character(s).
+/// Falls back to using the string literally if it's not a known name.
+fn resolve_separator(sep: &str) -> &str {
+    match sep {
+        "newline" => "\n",
+        "comma" => ",",
+        "space" => " ",
+        "tab" => "\t",
+        other if other.is_empty() => "\n", // empty → default to newline
+        other => other,                    // custom or literal separator
+    }
+}
+
+/// Split a source string into loop items by the given separator (default: newline),
+/// trimming whitespace and filtering empties. Caps the result at `max` items (default: 100).
+pub fn split_loop_items(source: &str, separator: Option<&str>, max: Option<u32>) -> Vec<String> {
+    let sep = resolve_separator(separator.unwrap_or("newline"));
+    let cap = max.unwrap_or(100).min(1000) as usize;
+    source
+        .split(sep)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .take(cap)
+        .collect()
 }
 
 pub fn parse_cost_from_stderr(lines: &[String]) -> Option<f64> {
@@ -961,7 +988,7 @@ async fn execute_node(
                 }
             }
             "comment" => (NodeStatus::Skipped, Some(0), None, String::new()),
-            "sub-pipeline" | "parallel" => (NodeStatus::Success, Some(0), None, String::new()),
+            "sub-pipeline" | "parallel" | "loop" => (NodeStatus::Success, Some(0), None, String::new()),
             _ => (NodeStatus::Success, Some(0), None, String::new()),
         };
 
@@ -1016,9 +1043,9 @@ pub fn find_back_edges(pipeline: &Pipeline) -> HashSet<(String, String)> {
             .or_default()
             .push(edge.to.clone());
     }
-    // Include implicit parallel group -> child edges
+    // Include implicit parallel/loop group -> child edges
     for node in &pipeline.nodes {
-        if node.node_type == "parallel" {
+        if node.node_type == "parallel" || node.node_type == "loop" {
             if let Some(children) = &node.children {
                 for cid in children {
                     adj.entry(node.id.clone()).or_default().push(cid.clone());
@@ -1109,10 +1136,10 @@ pub fn build_execution_order(pipeline: &Pipeline) -> (Vec<Vec<String>>, HashSet<
             *in_degree.entry(edge.to.clone()).or_insert(0) += 1;
         }
     }
-    // Implicit edges: parallel group -> each child.
+    // Implicit edges: parallel/loop group -> each child.
     // Children must not run before the group itself is reached.
     for node in &pipeline.nodes {
-        if node.node_type == "parallel" {
+        if node.node_type == "parallel" || node.node_type == "loop" {
             if let Some(children) = &node.children {
                 for cid in children {
                     adj.entry(node.id.clone()).or_default().push(cid.clone());
@@ -1456,6 +1483,468 @@ async fn run_pipeline_loop(
                             });
                         }
                     }
+                }
+                continue;
+            }
+
+            // Loop node: run children sequentially for each item
+            if node.node_type == "loop" {
+                // Resolve items source from instructions with variable/output substitution
+                let mut items_source = node.instructions.clone();
+                for (k, v) in &pipeline.variables {
+                    items_source = items_source.replace(&format!("${}", k), v);
+                    items_source = items_source.replace(&format!("${{{}}}", k), v);
+                }
+                for (k, v) in inputs {
+                    items_source = items_source.replace(&format!("{{input.{}}}", k), v);
+                    items_source = items_source.replace(&format!("{{{}}}", k), v);
+                }
+                for (k, v) in &node_outputs {
+                    items_source = items_source.replace(&format!("{{output.{}}}", k), v);
+                }
+
+                let items = split_loop_items(
+                    &items_source,
+                    node.loop_separator.as_deref(),
+                    node.max_iterations,
+                );
+
+                // Emit running status for the loop node
+                {
+                    let nr = NodeResult {
+                        node_id: node_id.clone(),
+                        status: NodeStatus::Running,
+                        exit_code: None,
+                        output: format!("Loop: {} items", items.len()),
+                        started_at: Some(now_iso()),
+                        finished_at: None,
+                        attempt: 1,
+                        cost_usd: None,
+                    };
+                    let mut guard = active_run.lock().await;
+                    if let Some(run) = guard.as_mut() {
+                        run.state.current_node = Some(node_id.clone());
+                        run.state.node_results.insert(node_id.clone(), nr.clone());
+                        emit_run_delta(app, node_delta(run_id, nr, None, Some(Some(node_id.clone())), None));
+                    }
+                }
+
+                if items.is_empty() {
+                    // No items to iterate — succeed immediately
+                    let gr = NodeResult {
+                        node_id: node_id.clone(),
+                        status: NodeStatus::Success,
+                        exit_code: Some(0),
+                        output: "Loop: 0 items".into(),
+                        started_at: Some(now_iso()),
+                        finished_at: Some(now_iso()),
+                        attempt: 1,
+                        cost_usd: Some(0.0),
+                    };
+                    results.insert(node_id.clone(), gr.clone());
+                    let delta_nr = gr.clone();
+                    let mut guard = active_run.lock().await;
+                    if let Some(run) = guard.as_mut() {
+                        run.state.node_results.insert(node_id.clone(), gr);
+                        emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
+                    }
+                    continue;
+                }
+
+                let children = node.children.clone().unwrap_or_default();
+                let mut loop_failed = false;
+                let loop_count = items.len();
+
+                // Fix 1: Accumulated cost tracking (prevents undercount from node_results overwrite)
+                let mut loop_accumulated_cost: f64 = 0.0;
+                let pre_loop_cost: f64 = {
+                    let guard = active_run.lock().await;
+                    guard.as_ref().map(|r| r.state.total_cost_usd).unwrap_or(0.0)
+                };
+
+                // Fix 4: Pre-run cost estimation
+                {
+                    let ai_children = children.iter()
+                        .filter(|c| node_map.get(*c).map(|n| n.node_type == "ai-task").unwrap_or(false))
+                        .count();
+                    if ai_children > 0 {
+                        if let Ok(Some(avg_cost)) = db::get_avg_ai_step_cost(pool).await {
+                            let estimated = avg_cost * items.len() as f64 * ai_children as f64;
+                            emit_node_log(
+                                app, run_id, node_id,
+                                &format!(
+                                    "Estimated loop cost: ${:.2} ({} items x {} AI children x ${:.4} avg/step)",
+                                    estimated, items.len(), ai_children, avg_cost
+                                ),
+                            );
+                            if let Some(limit) = pipeline.max_cost_usd {
+                                if estimated > limit {
+                                    emit_node_log(
+                                        app, run_id, node_id,
+                                        &format!("Estimated cost ${:.2} exceeds budget limit ${:.2}", estimated, limit),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fix 2: Timeout tracking using elapsed-time approach
+                let loop_start = Instant::now();
+                let aggregate_timeout = node.loop_timeout.map(Duration::from_secs);
+
+                // Fix 6: Clone variables once before the loop, mutate loop keys each iteration
+                let mut loop_vars = pipeline.variables.clone();
+
+                // In-memory dedup cache for duplicate items within the same run
+                let mut loop_dedup_cache: HashMap<String, NodeResult> = HashMap::new();
+
+                // Batch DB writes: collect steps per iteration
+                let mut pending_db_steps: Vec<db::RunStepInsert> = Vec::new();
+
+                for (idx, item) in items.iter().enumerate() {
+                    if loop_failed {
+                        break;
+                    }
+
+                    // Check cancellation
+                    if *cancel_rx.borrow() {
+                        loop_failed = true;
+                        break;
+                    }
+
+                    // Aggregate timeout check
+                    if let Some(limit) = aggregate_timeout {
+                        if loop_start.elapsed() > limit {
+                            emit_node_log(
+                                app, run_id, node_id,
+                                &format!(
+                                    "Loop aggregate timeout: {}s elapsed (limit: {}s)",
+                                    loop_start.elapsed().as_secs(), limit.as_secs()
+                                ),
+                            );
+                            loop_failed = true;
+                            break;
+                        }
+                    }
+
+                    emit_node_log(
+                        app,
+                        run_id,
+                        node_id,
+                        &format!("--- Loop iteration {}/{}: {} ---", idx + 1, loop_count, item),
+                    );
+
+                    // Mutate only the 3 loop keys each iteration (clone happened before the loop)
+                    loop_vars.insert("LOOP_ITEM".to_string(), item.clone());
+                    loop_vars.insert("LOOP_INDEX".to_string(), idx.to_string());
+                    loop_vars.insert("LOOP_COUNT".to_string(), loop_count.to_string());
+
+                    // Per-iteration timeout tracking
+                    let iter_start = Instant::now();
+                    let iter_timeout = node.timeout.map(Duration::from_secs);
+
+                    // Run each child sequentially for this iteration
+                    for cid in &children {
+                        // Per-iteration timeout check
+                        if let Some(limit) = iter_timeout {
+                            if iter_start.elapsed() > limit {
+                                emit_node_log(
+                                    app, run_id, node_id,
+                                    &format!(
+                                        "Iteration {}/{} timed out: {}s elapsed (limit: {}s)",
+                                        idx + 1, loop_count, iter_start.elapsed().as_secs(), limit.as_secs()
+                                    ),
+                                );
+                                loop_failed = true;
+                                break;
+                            }
+                        }
+
+                        if let Some(cn) = node_map.get(cid) {
+                            // Fix 1+2: Resolve child instructions with loop vars for cache key
+                            let mut resolved_instructions = cn.instructions.clone();
+                            for (k, v) in &loop_vars {
+                                resolved_instructions = resolved_instructions.replace(&format!("${}", k), v);
+                                resolved_instructions = resolved_instructions.replace(&format!("${{{}}}", k), v);
+                            }
+                            for (k, v) in inputs {
+                                resolved_instructions = resolved_instructions.replace(&format!("{{input.{}}}", k), v);
+                            }
+                            for (k, v) in &node_outputs {
+                                resolved_instructions = resolved_instructions.replace(&format!("{{output.{}}}", k), v);
+                            }
+
+                            // Fix 3: Loop model override — loop_model > child model > pipeline default
+                            let effective_default_model = node.loop_model.as_deref()
+                                .or(pipeline.default_model.as_deref());
+                            let eff_model = cn.model.as_deref().or(effective_default_model).unwrap_or("");
+                            let resolved_hash = hash_instructions(&format!("{}\n{}", resolved_instructions, eff_model));
+
+                            // In-memory dedup cache check (same run, same resolved content)
+                            let dedup_key = format!("{}:{}", cid, resolved_hash);
+                            if let Some(cached) = loop_dedup_cache.get(&dedup_key) {
+                                emit_node_log(app, run_id, cid, &format!("--- Reusing result from earlier iteration (iteration {}/{}) ---", idx + 1, loop_count));
+                                let child_result = cached.clone();
+
+                                if child_result.status == NodeStatus::Success && !child_result.output.is_empty() {
+                                    node_outputs.insert(child_result.node_id.clone(), child_result.output.clone());
+                                    let accum_key = format!("{}_all", child_result.node_id);
+                                    let existing = node_outputs.get(&accum_key).cloned().unwrap_or_default();
+                                    let accumulated = if existing.is_empty() {
+                                        child_result.output.clone()
+                                    } else {
+                                        format!("{}\n{}", existing, child_result.output)
+                                    };
+                                    node_outputs.insert(accum_key, accumulated);
+                                }
+
+                                let child_status = child_result.status.clone();
+                                results.insert(cid.clone(), child_result.clone());
+                                if let Some(cost) = child_result.cost_usd {
+                                    loop_accumulated_cost += cost;
+                                }
+
+                                pending_db_steps.push(db::RunStepInsert {
+                                    run_id: run_id.to_string(),
+                                    node_id: cid.clone(),
+                                    node_name: cn.name.clone(),
+                                    status: "Success".to_string(),
+                                    attempt: child_result.attempt as i32,
+                                    instructions_hash: resolved_hash.clone(),
+                                    exit_code: child_result.exit_code,
+                                    log_output: Some(child_result.output.clone()),
+                                    cost_usd: child_result.cost_usd,
+                                    model: Some(eff_model.to_string()),
+                                    approval_state: None,
+                                    iteration_index: Some(idx as i32),
+                                    loop_parent_id: Some(node_id.to_string()),
+                                });
+
+                                {
+                                    let delta_nr = child_result.clone();
+                                    let mut guard = active_run.lock().await;
+                                    if let Some(run) = guard.as_mut() {
+                                        run.state.node_results.insert(cid.clone(), child_result);
+                                        run.state.total_cost_usd = pre_loop_cost + loop_accumulated_cost;
+                                        emit_run_delta(app, node_delta(run_id, delta_nr, None, None, Some(run.state.total_cost_usd)));
+                                    }
+                                }
+
+                                if child_status != NodeStatus::Success {
+                                    loop_failed = true;
+                                    break;
+                                }
+                                continue;
+                            }
+
+                            // Fix 1: DB cache check for loop children (uses resolved hash)
+                            if cn.cache && cn.node_type == "ai-task" {
+                                if let Ok(Some((cached_output, cached_cost))) = db::find_cached_step(pool, &resolved_hash).await {
+                                    emit_node_log(app, run_id, cid, &format!("--- Using cached result (iteration {}/{}) ---", idx + 1, loop_count));
+                                    let child_result = NodeResult {
+                                        node_id: cid.clone(),
+                                        status: NodeStatus::Success,
+                                        exit_code: Some(0),
+                                        output: cached_output,
+                                        started_at: Some(now_iso()),
+                                        finished_at: Some(now_iso()),
+                                        attempt: 1,
+                                        cost_usd: cached_cost,
+                                    };
+
+                                    if !child_result.output.is_empty() {
+                                        node_outputs.insert(child_result.node_id.clone(), child_result.output.clone());
+                                        let accum_key = format!("{}_all", child_result.node_id);
+                                        let existing = node_outputs.get(&accum_key).cloned().unwrap_or_default();
+                                        let accumulated = if existing.is_empty() {
+                                            child_result.output.clone()
+                                        } else {
+                                            format!("{}\n{}", existing, child_result.output)
+                                        };
+                                        node_outputs.insert(accum_key, accumulated);
+                                    }
+
+                                    results.insert(cid.clone(), child_result.clone());
+                                    if let Some(cost) = child_result.cost_usd {
+                                        loop_accumulated_cost += cost;
+                                    }
+
+                                    // Store in dedup cache for later iterations
+                                    loop_dedup_cache.insert(dedup_key, child_result.clone());
+
+                                    pending_db_steps.push(db::RunStepInsert {
+                                        run_id: run_id.to_string(),
+                                        node_id: cid.clone(),
+                                        node_name: cn.name.clone(),
+                                        status: "Success".to_string(),
+                                        attempt: 1,
+                                        instructions_hash: resolved_hash.clone(),
+                                        exit_code: Some(0),
+                                        log_output: Some(child_result.output.clone()),
+                                        cost_usd: child_result.cost_usd,
+                                        model: Some(eff_model.to_string()),
+                                        approval_state: None,
+                                        iteration_index: Some(idx as i32),
+                                        loop_parent_id: Some(node_id.to_string()),
+                                    });
+
+                                    {
+                                        let delta_nr = child_result.clone();
+                                        let mut guard = active_run.lock().await;
+                                        if let Some(run) = guard.as_mut() {
+                                            run.state.node_results.insert(cid.clone(), child_result);
+                                            run.state.total_cost_usd = pre_loop_cost + loop_accumulated_cost;
+                                            emit_run_delta(app, node_delta(run_id, delta_nr, None, None, Some(run.state.total_cost_usd)));
+                                        }
+                                    }
+                                    continue;
+                                }
+                            }
+
+                            // Execute the child node
+                            let child_result = execute_node(
+                                app,
+                                cn,
+                                run_id,
+                                &loop_vars,
+                                inputs,
+                                &node_outputs,
+                                cli_path,
+                                project_path,
+                                active_run,
+                                cancel_rx,
+                                &pipeline.name,
+                                &pipeline.edges,
+                                false,
+                                effective_default_model,
+                            )
+                            .await;
+
+                            // Fix 4: Store output for downstream access + accumulate all iterations
+                            if child_result.status == NodeStatus::Success && !child_result.output.is_empty() {
+                                node_outputs.insert(child_result.node_id.clone(), child_result.output.clone());
+
+                                // Accumulate all iteration outputs for downstream access
+                                let accum_key = format!("{}_all", child_result.node_id);
+                                let existing = node_outputs.get(&accum_key).cloned().unwrap_or_default();
+                                let accumulated = if existing.is_empty() {
+                                    child_result.output.clone()
+                                } else {
+                                    format!("{}\n{}", existing, child_result.output)
+                                };
+                                node_outputs.insert(accum_key, accumulated);
+                            }
+
+                            let child_status = child_result.status.clone();
+                            results.insert(cid.clone(), child_result.clone());
+
+                            // Accumulate cost from each child iteration
+                            if let Some(cost) = child_result.cost_usd {
+                                loop_accumulated_cost += cost;
+                            }
+
+                            // Store successful results in dedup cache
+                            if child_result.status == NodeStatus::Success {
+                                loop_dedup_cache.insert(dedup_key, child_result.clone());
+                            }
+
+                            // Fix 2+5: Batch DB write with resolved hash
+                            {
+                                let db_status = match &child_result.status {
+                                    NodeStatus::Success => "Success",
+                                    NodeStatus::Failed => "Failed",
+                                    NodeStatus::Cancelled => "Cancelled",
+                                    NodeStatus::Skipped => "Skipped",
+                                    NodeStatus::Running => "Running",
+                                    NodeStatus::Pending => "Pending",
+                                }.to_string();
+
+                                pending_db_steps.push(db::RunStepInsert {
+                                    run_id: run_id.to_string(),
+                                    node_id: cid.clone(),
+                                    node_name: cn.name.clone(),
+                                    status: db_status,
+                                    attempt: child_result.attempt as i32,
+                                    instructions_hash: resolved_hash.clone(),
+                                    exit_code: child_result.exit_code,
+                                    log_output: Some(child_result.output.clone()),
+                                    cost_usd: child_result.cost_usd,
+                                    model: Some(eff_model.to_string()),
+                                    approval_state: None,
+                                    iteration_index: Some(idx as i32),
+                                    loop_parent_id: Some(node_id.to_string()),
+                                });
+                            }
+
+                            {
+                                let delta_nr = child_result.clone();
+                                let mut guard = active_run.lock().await;
+                                if let Some(run) = guard.as_mut() {
+                                    run.state.node_results.insert(cid.clone(), child_result);
+                                    run.state.total_cost_usd = pre_loop_cost + loop_accumulated_cost;
+
+                                    // Budget check (prevents runaway cost in loops)
+                                    let budget_status = if let Some(limit) = pipeline.max_cost_usd {
+                                        if run.state.total_cost_usd > limit {
+                                            emit_node_log(
+                                                app, run_id, node_id,
+                                                &format!("Budget limit exceeded during loop: ${:.4} > ${:.2}", run.state.total_cost_usd, limit),
+                                            );
+                                            run.cancelled = true;
+                                            let _ = run.cancel_tx.send(true);
+                                            run.state.status = "budget_exceeded".to_string();
+                                            Some("budget_exceeded")
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    emit_run_delta(app, node_delta(run_id, delta_nr, budget_status, None, Some(run.state.total_cost_usd)));
+                                }
+                            }
+
+                            if child_status != NodeStatus::Success {
+                                loop_failed = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Fix 5: Flush batch DB writes at end of each iteration
+                    if !pending_db_steps.is_empty() {
+                        let steps = std::mem::take(&mut pending_db_steps);
+                        let db_pool = pool.clone();
+                        tokio::spawn(async move {
+                            let _ = db::insert_run_steps_batch(&db_pool, &steps).await;
+                        });
+                    }
+
+                    if loop_failed { break; }
+                }
+
+                // Fix 3: Set final loop node status with accumulated cost
+                let gr = NodeResult {
+                    node_id: node_id.clone(),
+                    status: if loop_failed {
+                        NodeStatus::Failed
+                    } else {
+                        NodeStatus::Success
+                    },
+                    exit_code: Some(if loop_failed { 1 } else { 0 }),
+                    output: format!("Loop completed: {} items", loop_count),
+                    started_at: Some(now_iso()),
+                    finished_at: Some(now_iso()),
+                    attempt: 1,
+                    cost_usd: Some(loop_accumulated_cost),
+                };
+                results.insert(node_id.clone(), gr.clone());
+                let delta_nr = gr.clone();
+                let mut guard = active_run.lock().await;
+                if let Some(run) = guard.as_mut() {
+                    run.state.node_results.insert(node_id.clone(), gr);
+                    emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                 }
                 continue;
             }
@@ -1809,6 +2298,7 @@ async fn run_pipeline_loop(
                             db_exit_code, Some(&db_output),
                             db_cost, Some(&db_model),
                             db_approval_state.as_deref(),
+                            None, None,
                         ).await;
                     });
                 }
@@ -1922,10 +2412,10 @@ async fn run_pipeline_loop(
             }
         }
 
-        // Handle parallel group status
+        // Handle parallel group status (loop nodes set their own status inline)
         for node_id in &runnable {
             if let Some(node) = node_map.get(node_id) {
-                if node.node_type == "parallel" {
+                if node.node_type == "parallel" || (node.node_type == "loop" && !results.contains_key(node_id)) {
                     let ok = node
                         .children
                         .as_ref()
@@ -2124,6 +2614,7 @@ async fn run_pipeline_loop(
                                 &db_status, db_attempt, &db_hash,
                                 db_exit_code, Some(&db_output),
                                 db_cost, Some(&db_model), None,
+                                None, None,
                             ).await;
                         });
                     }
@@ -2736,6 +3227,10 @@ mod tests {
             requires_tools: vec![],
             model: None,
             cache: false,
+            loop_separator: None,
+            max_iterations: None,
+            loop_timeout: None,
+            loop_model: None,
             position: Position { x: 0.0, y: 0.0 },
         }
     }
@@ -3155,5 +3650,169 @@ mod tests {
         }"#;
         let p: Pipeline = serde_json::from_str(json).unwrap();
         assert!(!p.shared_session);
+    }
+
+    // --- loop node: execution order ---
+
+    #[test]
+    fn exec_order_loop_with_children() {
+        let mut loop_node = make_node("loop1", "Loop");
+        loop_node.node_type = "loop".into();
+        loop_node.children = Some(vec!["c1".into(), "c2".into()]);
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![
+                make_node("a", "A"),
+                loop_node,
+                make_node("c1", "Child 1"),
+                make_node("c2", "Child 2"),
+                make_node("b", "B"),
+            ],
+            edges: vec![make_edge("a", "loop1", None), make_edge("loop1", "b", None)],
+            shared_session: true,
+            default_model: None,
+            max_cost_usd: None,
+        };
+        let (order, back_edges) = build_execution_order(&p);
+        assert!(back_edges.is_empty());
+        // All 5 nodes should appear in the execution order
+        let all_nodes: HashSet<String> = order.iter().flat_map(|level| level.iter().cloned()).collect();
+        assert_eq!(all_nodes.len(), 5);
+        assert!(all_nodes.contains("a"));
+        assert!(all_nodes.contains("loop1"));
+        assert!(all_nodes.contains("c1"));
+        assert!(all_nodes.contains("c2"));
+        assert!(all_nodes.contains("b"));
+    }
+
+    #[test]
+    fn exec_order_loop_no_children() {
+        let mut loop_node = make_node("loop1", "Loop");
+        loop_node.node_type = "loop".into();
+        // No children set
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![make_node("a", "A"), loop_node, make_node("b", "B")],
+            edges: vec![make_edge("a", "loop1", None), make_edge("loop1", "b", None)],
+            shared_session: true,
+            default_model: None,
+            max_cost_usd: None,
+        };
+        let (order, back_edges) = build_execution_order(&p);
+        assert!(back_edges.is_empty());
+        let all_nodes: HashSet<String> = order.iter().flat_map(|level| level.iter().cloned()).collect();
+        assert_eq!(all_nodes.len(), 3);
+    }
+
+    #[test]
+    fn find_back_edges_loop_children() {
+        // Ensure loop children are included in back-edge detection adjacency.
+        // Graph: root -> loop1 (implicit: loop1 -> c1), c1 -> loop1 (explicit back edge)
+        let mut loop_node = make_node("loop1", "Loop");
+        loop_node.node_type = "loop".into();
+        loop_node.children = Some(vec!["c1".into()]);
+        let p = Pipeline {
+            name: "test".into(),
+            description: "".into(),
+            version: "1.0".into(),
+            variables: HashMap::new(),
+            nodes: vec![make_node("root", "Root"), loop_node, make_node("c1", "Child 1")],
+            edges: vec![
+                make_edge("root", "loop1", None),
+                make_edge("c1", "loop1", Some("failure")),
+            ],
+            shared_session: true,
+            default_model: None,
+            max_cost_usd: None,
+        };
+        let back = find_back_edges(&p);
+        // The implicit edge loop1->c1 plus explicit c1->loop1 forms a cycle.
+        // DFS from root visits loop1 first, then c1 via implicit edge,
+        // so c1->loop1 is the back edge.
+        assert_eq!(back.len(), 1);
+        assert!(back.contains(&("c1".to_string(), "loop1".to_string())));
+    }
+
+    // --- split_loop_items ---
+
+    #[test]
+    fn loop_variable_substitution() {
+        let items = split_loop_items("a\nb\nc", None, None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn loop_separator_comma() {
+        // Named separator from frontend dropdown
+        let items = split_loop_items("x,y,z", Some("comma"), None);
+        assert_eq!(items, vec!["x", "y", "z"]);
+        // Literal comma also works (backward compat)
+        let items = split_loop_items("x,y,z", Some(","), None);
+        assert_eq!(items, vec!["x", "y", "z"]);
+    }
+
+    #[test]
+    fn loop_max_iterations_cap() {
+        let source: String = (0..200).map(|i| format!("item{}", i)).collect::<Vec<_>>().join("\n");
+        let items = split_loop_items(&source, None, Some(10));
+        assert_eq!(items.len(), 10);
+        assert_eq!(items[0], "item0");
+        assert_eq!(items[9], "item9");
+    }
+
+    #[test]
+    fn loop_empty_items() {
+        let items = split_loop_items("", None, None);
+        assert!(items.is_empty());
+
+        let items = split_loop_items("   \n  \n  ", None, None);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn loop_items_trim_whitespace() {
+        let items = split_loop_items(" a \n b \n ", None, None);
+        assert_eq!(items, vec!["a", "b"]);
+    }
+
+    // --- resolve_separator safety ---
+
+    #[test]
+    fn loop_resolve_named_separators() {
+        // All named separators from frontend dropdown
+        let items = split_loop_items("a\nb\nc", Some("newline"), None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+        let items = split_loop_items("a,b,c", Some("comma"), None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+        let items = split_loop_items("a b c", Some("space"), None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+        let items = split_loop_items("a\tb\tc", Some("tab"), None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn loop_empty_separator_defaults_to_newline() {
+        // Empty separator string must not cause split-on-every-byte
+        let items = split_loop_items("a\nb\nc", Some(""), None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn loop_custom_separator_passthrough() {
+        // Custom literal separator (e.g., "||")
+        let items = split_loop_items("a||b||c", Some("||"), None);
+        assert_eq!(items, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn loop_max_iterations_zero_produces_nothing() {
+        let items = split_loop_items("a\nb\nc", None, Some(0));
+        assert!(items.is_empty());
     }
 }

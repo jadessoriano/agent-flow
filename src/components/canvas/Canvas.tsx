@@ -44,6 +44,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   "shell": "#10b981",
   "git": "#f97316",
   "parallel": "#3b82f6",
+  "loop": "#ec4899",
   "approval-gate": "#f59e0b",
   "sub-pipeline": "#06b6d4",
   "comment": "#a1a1aa",
@@ -54,36 +55,269 @@ function minimapNodeColor(node: Node): string {
   return MINIMAP_NODE_COLORS[nd?.nodeType] ?? "#71717a";
 }
 
+/** Build a map of child node ID → parent node info for loop/parallel groups */
+function buildChildParentMap(
+  nodes: PipelineNode[],
+  cachedPositions?: Record<string, { x: number; y: number }> | null,
+): Map<string, { name: string; type: NodeType; side: "left" | "right" }> {
+  const map = new Map<string, { name: string; type: NodeType; side: "left" | "right" }>();
+  for (const node of nodes) {
+    if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
+      const parentPos = cachedPositions?.[node.id] ?? node.position;
+      for (const cid of node.children) {
+        const childPos = cachedPositions?.[cid] ?? nodes.find((n) => n.id === cid)?.position;
+        const childIsLeft = childPos != null && childPos.x + 200 < parentPos.x + 100;
+        map.set(cid, { name: node.name, type: node.type, side: childIsLeft ? "right" : "left" });
+      }
+    }
+  }
+  return map;
+}
+
+/** Color for synthetic edges by parent node type */
+const SYNTH_EDGE_COLORS: Partial<Record<NodeType, string>> = {
+  loop: "#ec4899",     // pink
+  parallel: "#3b82f6", // blue
+};
+
+/** Build sets of node IDs that have incoming/outgoing connections (edges + implicit children) */
+function buildConnectionSets(
+  nodes: PipelineNode[],
+  edges: { from: string; to: string }[],
+): { incoming: Set<string>; outgoing: Set<string> } {
+  const incoming = new Set<string>();
+  const outgoing = new Set<string>();
+  for (const e of edges) {
+    outgoing.add(e.from);
+    incoming.add(e.to);
+  }
+  // Implicit connections: loop/parallel parent → children
+  for (const node of nodes) {
+    if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
+      outgoing.add(node.id);
+      for (const cid of node.children) incoming.add(cid);
+    }
+  }
+  return { incoming, outgoing };
+}
+
 function pipelineNodesToFlow(
   nodes: PipelineNode[],
   nodeStatuses?: Record<string, string>,
   nodeCosts?: Record<string, number | null>,
   cachedPositions?: Record<string, { x: number; y: number }> | null,
   nodeDurations?: Record<string, string | undefined>,
+  childParentMap?: Map<string, { name: string; type: NodeType; side: "left" | "right" }>,
+  connectionSets?: { incoming: Set<string>; outgoing: Set<string> },
 ): Node[] {
-  return nodes.map((n) => ({
-    id: n.id,
-    type: "pipelineNode",
-    position: cachedPositions?.[n.id] ?? n.position,
-    data: {
-      label: n.name,
-      nodeType: n.type,
-      instructions: n.instructions,
-      inputs: n.inputs,
-      outputs: n.outputs,
-      agent: n.agent,
-      pipelineRef: n.pipeline_ref,
-      runStatus: nodeStatuses?.[n.id],
-      costUsd: nodeCosts?.[n.id] ?? undefined,
-      durationStr: nodeDurations?.[n.id],
-    } satisfies FlowNodeData,
-  }));
+  return nodes.map((n) => {
+    const parent = childParentMap?.get(n.id);
+    return {
+      id: n.id,
+      type: "pipelineNode",
+      position: cachedPositions?.[n.id] ?? n.position,
+      style: { cursor: "pointer" },
+      data: {
+        label: n.name,
+        nodeType: n.type,
+        instructions: n.instructions,
+        inputs: n.inputs,
+        outputs: n.outputs,
+        agent: n.agent,
+        pipelineRef: n.pipeline_ref,
+        runStatus: nodeStatuses?.[n.id],
+        costUsd: nodeCosts?.[n.id] ?? undefined,
+        durationStr: nodeDurations?.[n.id],
+        groupParentName: parent?.name,
+        groupParentType: parent?.type,
+        groupParentSide: parent?.side,
+        hasIncoming: connectionSets?.incoming.has(n.id),
+        hasOutgoing: connectionSets?.outgoing.has(n.id),
+      } satisfies FlowNodeData,
+    };
+  });
+}
+
+/** Compute Y midpoint of all nodes for backward edge routing decisions */
+function computeGraphMidY(
+  nodes: PipelineNode[],
+  cachedPositions?: Record<string, { x: number; y: number }> | null,
+): number {
+  if (nodes.length === 0) return 0;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    const y = cachedPositions?.[n.id]?.y ?? n.position.y;
+    if (y < minY) minY = y;
+    if (y + 80 > maxY) maxY = y + 80;
+  }
+  return (minY + maxY) / 2;
+}
+
+const NODE_W = 200;
+const NODE_H = 80;
+
+/** Estimate the handle position for a node */
+function handlePos(
+  nodeId: string,
+  side: "source" | "target",
+  nodeMap: Map<string, { x: number; y: number }>,
+): { x: number; y: number } | null {
+  const pos = nodeMap.get(nodeId);
+  if (!pos) return null;
+  return side === "source"
+    ? { x: pos.x + NODE_W, y: pos.y + NODE_H / 2 }
+    : { x: pos.x, y: pos.y + NODE_H / 2 };
+}
+
+/** Check if a straight line between two points crosses any node bounding boxes */
+function hasNodeObstacle(
+  sx: number, sy: number, tx: number, ty: number,
+  nodeRects: { x: number; y: number; w: number; h: number }[],
+  excludeNodes: Set<string>,
+  nodeIds: string[],
+): boolean {
+  const pad = 15;
+  const minX = Math.min(sx, tx) + pad;
+  const maxX = Math.max(sx, tx) - pad;
+  if (maxX <= minX) return false;
+
+  const edgeMinY = Math.min(sy, ty) - 15;
+  const edgeMaxY = Math.max(sy, ty) + 15;
+
+  for (let i = 0; i < nodeRects.length; i++) {
+    if (excludeNodes.has(nodeIds[i])) continue;
+    const r = nodeRects[i];
+    if (r.x + r.w < minX || r.x > maxX) continue;
+    if (r.y + r.h < edgeMinY || r.y > edgeMaxY) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Compute route offsets for edges that need rerouting (backward or obstacle).
+ * Assigns different lanes to avoid edge-to-edge crossings where possible.
+ *
+ * Returns a Map of edgeId → routeOffset.
+ */
+function computeRouteOffsets(
+  edges: { id: string; from: string; to: string; condition?: string }[],
+  nodeMap: Map<string, { x: number; y: number }>,
+  nodeRects: { x: number; y: number; w: number; h: number }[],
+  nodeIds: string[],
+  graphMidY: number,
+): Map<string, number> {
+  const offsets = new Map<string, number>();
+
+  // Classify edges that need rerouting
+  type RerouteInfo = { id: string; sx: number; sy: number; tx: number; ty: number; kind: "backward" | "obstacle" };
+  const toReroute: RerouteInfo[] = [];
+
+  for (const e of edges) {
+    const src = handlePos(e.from, "source", nodeMap);
+    const tgt = handlePos(e.to, "target", nodeMap);
+    if (!src || !tgt) continue;
+
+    const isBackward = src.x > tgt.x - 20;
+    if (isBackward) {
+      toReroute.push({ id: e.id, sx: src.x, sy: src.y, tx: tgt.x, ty: tgt.y, kind: "backward" });
+      continue;
+    }
+
+    const exclude = new Set([e.from, e.to]);
+    if (hasNodeObstacle(src.x, src.y, tgt.x, tgt.y, nodeRects, exclude, nodeIds)) {
+      toReroute.push({ id: e.id, sx: src.x, sy: src.y, tx: tgt.x, ty: tgt.y, kind: "obstacle" });
+    }
+  }
+
+  if (toReroute.length === 0) return offsets;
+
+  // Candidate lanes: alternating above/below with increasing distance
+  // [-60, +60, -120, +120, -180, +180, ...]
+  const MAX_LANES = 8;
+  const LANE_STEP = 60;
+  const lanes: number[] = [];
+  for (let i = 1; i <= MAX_LANES; i++) {
+    lanes.push(-i * LANE_STEP);
+    lanes.push(i * LANE_STEP);
+  }
+
+  // Track which lanes are already used (by approximate Y region)
+  // Key: a bucket representing the horizontal span, Value: set of used lane offsets
+  const usedLanes = new Map<string, Set<number>>();
+
+  function spanKey(sx: number, tx: number): string {
+    // Bucket by 200px horizontal chunks to detect overlapping edges
+    const lo = Math.floor(Math.min(sx, tx) / 200);
+    const hi = Math.floor(Math.max(sx, tx) / 200);
+    return `${lo}-${hi}`;
+  }
+
+  // Sort: backward edges first, then by horizontal span (wider first)
+  // so wider spans get first pick of lanes
+  toReroute.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "backward" ? -1 : 1;
+    return Math.abs(b.sx - b.tx) - Math.abs(a.sx - a.tx);
+  });
+
+  for (const info of toReroute) {
+    const key = spanKey(info.sx, info.tx);
+    const used = usedLanes.get(key) ?? new Set();
+
+    // For backward edges, prefer routing to the side with more space
+    const edgeMidY = (info.sy + info.ty) / 2;
+    const preferBelow = edgeMidY < graphMidY;
+
+    // Try lanes in preference order
+    let bestLane = preferBelow ? LANE_STEP : -LANE_STEP;
+    const sortedLanes = [...lanes].sort((a, b) => {
+      // Prefer the direction with more space
+      const aPreferred = preferBelow ? (a > 0 ? 0 : 1) : (a < 0 ? 0 : 1);
+      const bPreferred = preferBelow ? (b > 0 ? 0 : 1) : (b < 0 ? 0 : 1);
+      if (aPreferred !== bPreferred) return aPreferred - bPreferred;
+      // Then prefer smaller magnitude (closer to nodes)
+      return Math.abs(a) - Math.abs(b);
+    });
+
+    for (const lane of sortedLanes) {
+      if (!used.has(lane)) {
+        bestLane = lane;
+        break;
+      }
+    }
+
+    used.add(bestLane);
+    usedLanes.set(key, used);
+    offsets.set(info.id, bestLane);
+  }
+
+  return offsets;
 }
 
 function pipelineEdgesToFlow(
   edges: { id: string; from: string; to: string; condition?: string }[],
+  nodes?: PipelineNode[],
+  graphMidY?: number,
+  cachedPositions?: Record<string, { x: number; y: number }> | null,
 ): Edge[] {
-  return edges.map((e) => {
+  // Build node position map and bounding boxes
+  const nodeMap = new Map<string, { x: number; y: number }>();
+  const nodeRects: { x: number; y: number; w: number; h: number }[] = [];
+  const nodeIds: string[] = [];
+  if (nodes) {
+    for (const n of nodes) {
+      const pos = cachedPositions?.[n.id] ?? n.position;
+      nodeMap.set(n.id, pos);
+      nodeRects.push({ x: pos.x, y: pos.y, w: NODE_W, h: NODE_H });
+      nodeIds.push(n.id);
+    }
+  }
+
+  // Compute centralized route offsets for edges that need rerouting
+  const routeOffsets = computeRouteOffsets(edges, nodeMap, nodeRects, nodeIds, graphMidY ?? 0);
+
+  const flowEdges: Edge[] = edges.map((e) => {
     const strokeColor = e.condition === "success"
       ? "#22c55e"
       : e.condition === "failure"
@@ -92,12 +326,54 @@ function pipelineEdgesToFlow(
     return {
       id: e.id,
       source: e.from,
+      sourceHandle: "right",
       target: e.to,
+      targetHandle: "left",
       type: "conditional",
-      data: { condition: e.condition },
+      data: {
+        condition: e.condition,
+        graphMidY,
+        routeOffset: routeOffsets.get(e.id) ?? 0,
+      },
       style: { stroke: strokeColor, strokeWidth: 2 },
     };
   });
+
+  // Generate synthetic dashed edges for loop/parallel children
+  // Uses the closest pair of handles based on relative node positions
+  if (nodes) {
+    for (const node of nodes) {
+      if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
+        const color = SYNTH_EDGE_COLORS[node.type] ?? "#71717a";
+        const label = node.type === "loop" ? "each item \u21BB" : "branch \u2225";
+        const parentPos = nodeMap.get(node.id);
+        for (const cid of node.children) {
+          const childPos = nodeMap.get(cid);
+          // If child is to the left of parent, connect parent's left → child's right
+          const childIsLeft = parentPos && childPos && childPos.x + NODE_W < parentPos.x + NODE_W / 2;
+          flowEdges.push({
+            id: `_synth_${node.id}_${cid}`,
+            source: node.id,
+            sourceHandle: childIsLeft ? "left-out" : "right",
+            target: cid,
+            targetHandle: childIsLeft ? "right-in" : "left",
+            type: "conditional",
+            deletable: false,
+            selectable: false,
+            data: { synthetic: true, synthLabel: label, synthColor: color, directPath: childIsLeft || false },
+            style: {
+              stroke: color,
+              strokeWidth: 1.5,
+              strokeDasharray: "6,4",
+              opacity: 0.7,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  return flowEdges;
 }
 
 export default function Canvas() {
@@ -126,6 +402,7 @@ export default function Canvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const [minimapOverlap, setMinimapOverlap] = useState(false);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // Check overlap only when movement stops — CSS transition handles the visual smoothing
   const checkMinimapOverlap = useCallback(() => {
@@ -137,8 +414,6 @@ export default function Canvas() {
     if (!minimapEl) return;
 
     const mmRect = minimapEl.getBoundingClientRect();
-    const NODE_W = 200;
-    const NODE_H = 80;
 
     const overlaps = currentPipeline.nodes.some((node) => {
       const screenPos = instance.flowToScreenPosition(node.position);
@@ -164,14 +439,29 @@ export default function Canvas() {
     [currentPipelinePath],
   );
 
+  const childParentMap = useMemo(
+    () => (currentPipeline ? buildChildParentMap(currentPipeline.nodes, cachedPositions) : new Map()),
+    [currentPipeline?.nodes, cachedPositions],
+  );
+
+  const connectionSets = useMemo(
+    () => (currentPipeline ? buildConnectionSets(currentPipeline.nodes, currentPipeline.edges) : { incoming: new Set<string>(), outgoing: new Set<string>() }),
+    [currentPipeline?.nodes, currentPipeline?.edges],
+  );
+
   const initialNodes = useMemo(
-    () => (currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cachedPositions, undefined) : []),
+    () => (currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cachedPositions, undefined, childParentMap, connectionSets) : []),
+    [currentPipeline?.nodes, cachedPositions, childParentMap, connectionSets],
+  );
+
+  const graphMidY = useMemo(
+    () => (currentPipeline ? computeGraphMidY(currentPipeline.nodes, cachedPositions) : 0),
     [currentPipeline?.nodes, cachedPositions],
   );
 
   const initialEdges = useMemo(
-    () => (currentPipeline ? pipelineEdgesToFlow(currentPipeline.edges) : []),
-    [currentPipeline?.edges],
+    () => (currentPipeline ? pipelineEdgesToFlow(currentPipeline.edges, currentPipeline.nodes, graphMidY, cachedPositions) : []),
+    [currentPipeline?.edges, currentPipeline?.nodes, graphMidY, cachedPositions],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -182,8 +472,8 @@ export default function Canvas() {
   // falling back to cached positions only on initial pipeline load.
   useEffect(() => {
     const cached = currentPipelinePath ? getCachedLayout(currentPipelinePath) : null;
-    setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cached, undefined) : []);
-  }, [currentPipeline?.nodes, currentPipelinePath, setNodes]);
+    setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cached, undefined, childParentMap, connectionSets) : []);
+  }, [currentPipeline?.nodes, currentPipelinePath, setNodes, childParentMap, connectionSets]);
 
   // Update run status/cost/duration in-place (avoids full node rebuild on every run-update)
   // Only apply results when the run belongs to the currently open pipeline
@@ -213,8 +503,102 @@ export default function Canvas() {
   }, [runState, runBelongsToPipeline, setNodes]);
 
   useEffect(() => {
-    setEdges(currentPipeline ? pipelineEdgesToFlow(currentPipeline.edges) : []);
-  }, [currentPipeline?.edges, setEdges]);
+    setEdges(currentPipeline ? pipelineEdgesToFlow(currentPipeline.edges, currentPipeline.nodes, graphMidY, cachedPositions) : []);
+  }, [currentPipeline?.edges, currentPipeline?.nodes, graphMidY, cachedPositions, setEdges]);
+
+  // Hover highlight: compute which nodes and edges should stay bright
+  const highlightSets = useMemo(() => {
+    if (!hoveredNodeId || !currentPipeline) return null;
+
+    const highlightedNodes = new Set<string>();
+    const highlightedEdges = new Set<string>();
+
+    highlightedNodes.add(hoveredNodeId);
+
+    // Build parent→children map and child→parent map
+    const parentToChildren = new Map<string, string[]>();
+    const childToParent = new Map<string, string>();
+    for (const node of currentPipeline.nodes) {
+      if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
+        parentToChildren.set(node.id, node.children);
+        for (const cid of node.children) {
+          childToParent.set(cid, node.id);
+        }
+      }
+    }
+
+    // If hovered node is a parent → highlight all its children
+    const children = parentToChildren.get(hoveredNodeId);
+    if (children) {
+      for (const cid of children) highlightedNodes.add(cid);
+    }
+
+    // If hovered node is a child → highlight its parent and all siblings
+    const parentId = childToParent.get(hoveredNodeId);
+    if (parentId) {
+      highlightedNodes.add(parentId);
+      const siblings = parentToChildren.get(parentId);
+      if (siblings) {
+        for (const sib of siblings) highlightedNodes.add(sib);
+      }
+    }
+
+    // Also highlight directly connected nodes via explicit edges
+    for (const e of currentPipeline.edges) {
+      if (highlightedNodes.has(e.from) && highlightedNodes.has(e.to)) {
+        highlightedEdges.add(e.id);
+      } else if (e.from === hoveredNodeId || e.to === hoveredNodeId) {
+        highlightedNodes.add(e.from);
+        highlightedNodes.add(e.to);
+        highlightedEdges.add(e.id);
+      }
+    }
+
+    // Highlight synthetic edges between highlighted nodes
+    for (const node of currentPipeline.nodes) {
+      if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
+        if (highlightedNodes.has(node.id)) {
+          for (const cid of node.children) {
+            if (highlightedNodes.has(cid)) {
+              highlightedEdges.add(`_synth_${node.id}_${cid}`);
+            }
+          }
+        }
+      }
+    }
+
+    return { nodes: highlightedNodes, edges: highlightedEdges };
+  }, [hoveredNodeId, currentPipeline]);
+
+  // Apply dim/highlight classes to React Flow nodes and edges
+  useEffect(() => {
+    if (!highlightSets) {
+      // No hover — remove all dim classes and dimmed data
+      setNodes((nds) => nds.map((n) => {
+        if (!n.className) return n;
+        return { ...n, className: undefined };
+      }));
+      setEdges((eds) => eds.map((e) => {
+        const d = e.data as Record<string, unknown> | undefined;
+        if (!e.className && !d?.dimmed) return e;
+        return { ...e, className: undefined, data: { ...d, dimmed: false } };
+      }));
+      return;
+    }
+
+    setNodes((nds) => nds.map((n) => ({
+      ...n,
+      className: highlightSets.nodes.has(n.id) ? "af-highlighted" : "af-dimmed",
+    })));
+    setEdges((eds) => eds.map((e) => {
+      const isHighlighted = highlightSets.edges.has(e.id);
+      return {
+        ...e,
+        className: isHighlighted ? "af-highlighted" : "af-dimmed",
+        data: { ...(e.data as Record<string, unknown>), dimmed: !isHighlighted },
+      };
+    }));
+  }, [highlightSets, setNodes, setEdges]);
 
   // Respond to fitView triggers (e.g., Space key)
   useEffect(() => {
@@ -334,10 +718,20 @@ export default function Canvas() {
 
   const onEdgesDelete = useCallback(
     (deleted: Edge[]) => {
-      deleted.forEach((e) => removeEdge(e.id));
+      deleted
+        .filter((e) => !e.id.startsWith("_synth_")) // synthetic edges are not deletable
+        .forEach((e) => removeEdge(e.id));
     },
     [removeEdge],
   );
+
+  const onNodeMouseEnter = useCallback((_event: React.MouseEvent, node: Node) => {
+    setHoveredNodeId(node.id);
+  }, []);
+
+  const onNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null);
+  }, []);
 
   // Drop handler for node palette
   const onDragOver = useCallback((event: DragEvent) => {
@@ -454,6 +848,8 @@ export default function Canvas() {
         onEdgeClick={onEdgeClick}
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onDragOver={onDragOver}
         onDrop={onDrop}
         onInit={(instance) => { reactFlowInstance.current = instance; checkMinimapOverlap(); }}

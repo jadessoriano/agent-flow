@@ -9,6 +9,8 @@ import NodeIcon from "../canvas/nodes/NodeIcons";
 const isSubPipeline = (type: string) => type === "sub-pipeline";
 const isComment = (type: string) => type === "comment";
 const isCodeNode = (type: string) => type === "shell" || type === "git";
+const isLoop = (type: string) => type === "loop";
+const isParallelOrLoop = (type: string) => type === "parallel" || type === "loop";
 
 export default memo(function NodeConfig() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
@@ -32,7 +34,12 @@ export default memo(function NodeConfig() {
   const [retryDelay, setRetryDelay] = useState(0);
   const [timeout, setTimeout_] = useState(0);
   const [model, setModel] = useState("");
+  const [loopModel, setLoopModel] = useState("");
   const [cache, setCache] = useState(false);
+  const [children, setChildren] = useState<string[]>([]);
+  const [loopSeparator, setLoopSeparator] = useState("newline");
+  const [maxIterations, setMaxIterations] = useState(100);
+  const [loopTimeout, setLoopTimeout] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -49,7 +56,12 @@ export default memo(function NodeConfig() {
       setRetryDelay(node.retry?.delay ?? 0);
       setTimeout_(node.timeout ?? 0);
       setModel(node.model || "");
+      setLoopModel(node.loop_model || "");
       setCache(node.cache || false);
+      setChildren(node.children ?? []);
+      setLoopSeparator(node.loop_separator || "newline");
+      setMaxIterations(node.max_iterations ?? 100);
+      setLoopTimeout(node.loop_timeout ?? 0);
       setConfirmDelete(false);
       setShowPreview(false);
     }
@@ -103,7 +115,12 @@ export default memo(function NodeConfig() {
       retry,
       timeout: timeout > 0 ? timeout : undefined,
       model: model || undefined,
+      loop_model: isLoop(node.type) && loopModel ? loopModel : undefined,
       cache: cache || undefined,
+      children: isParallelOrLoop(node.type) ? children : undefined,
+      loop_separator: isLoop(node.type) ? loopSeparator : undefined,
+      max_iterations: isLoop(node.type) ? Math.max(1, Math.min(1000, maxIterations || 100)) : undefined,
+      loop_timeout: isLoop(node.type) && loopTimeout > 0 ? loopTimeout : undefined,
     });
   };
 
@@ -186,7 +203,7 @@ export default memo(function NodeConfig() {
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className="text-xs font-medium text-zinc-400">
-                {isCodeNode(node.type) ? "Command" : "Instructions"}
+                {isCodeNode(node.type) ? "Command" : isLoop(node.type) ? "Items Source" : "Instructions"}
               </label>
               <button
                 type="button"
@@ -211,10 +228,125 @@ export default memo(function NodeConfig() {
                 placeholder={
                   node.type === "shell"
                     ? "e.g., npm test"
-                    : "Describe what this step should do..."
+                    : isLoop(node.type)
+                      ? "{output.upstream-node} or one item per line"
+                      : "Describe what this step should do..."
                 }
               />
             )}
+          </div>
+        )}
+
+        {/* Loop separator */}
+        {isLoop(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Separator
+            </label>
+            <select
+              value={["newline", "comma", "space", "tab"].includes(loopSeparator) ? loopSeparator : "custom"}
+              onChange={(e) => setLoopSeparator(e.target.value === "custom" ? "" : e.target.value)}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+            >
+              <option value="newline">Newline</option>
+              <option value="comma">Comma</option>
+              <option value="space">Space</option>
+              <option value="tab">Tab</option>
+              <option value="custom">Custom</option>
+            </select>
+            {!["newline", "comma", "space", "tab"].includes(loopSeparator) && (
+              <input
+                type="text"
+                value={loopSeparator}
+                onChange={(e) => setLoopSeparator(e.target.value)}
+                placeholder="e.g., || or ; or any delimiter"
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+              />
+            )}
+            <p className="mt-1 text-[10px] text-zinc-600">
+              How to split the items source into individual items
+            </p>
+          </div>
+        )}
+
+        {/* Loop max iterations */}
+        {isLoop(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Max Iterations
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={maxIterations}
+              onChange={(e) => setMaxIterations(Number(e.target.value))}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+            />
+            <p className="mt-1 text-[10px] text-zinc-600">
+              Safety limit to prevent runaway loops
+            </p>
+          </div>
+        )}
+
+        {/* Loop model override */}
+        {isLoop(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Loop Model
+            </label>
+            <select
+              value={loopModel}
+              onChange={(e) => setLoopModel(e.target.value)}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+            >
+              <option value="">(use child/pipeline default)</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+              <option value="claude-opus-4-6">Opus 4.6</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+            </select>
+            <p className="mt-1 text-[10px] text-zinc-600">
+              Override the model used for all child nodes in this loop
+            </p>
+          </div>
+        )}
+
+        {/* Children (parallel and loop groups) */}
+        {isParallelOrLoop(node.type) && currentPipeline && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Children
+            </label>
+            <div className="rounded border border-zinc-700 bg-zinc-800 p-2 max-h-40 overflow-y-auto">
+              {currentPipeline.nodes
+                .filter((n) => n.id !== node.id && n.type !== "parallel" && n.type !== "loop")
+                .map((n) => (
+                  <label key={n.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-zinc-700/50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={children.includes(n.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setChildren([...children, n.id]);
+                        } else {
+                          setChildren(children.filter((c) => c !== n.id));
+                        }
+                      }}
+                      className="h-3 w-3 rounded border-zinc-600 bg-zinc-800 text-violet-500 focus:ring-violet-500"
+                    />
+                    <span className="text-xs text-zinc-300">{n.name}</span>
+                    <span className="text-[10px] text-zinc-600">{n.type}</span>
+                  </label>
+                ))}
+              {currentPipeline.nodes.filter((n) => n.id !== node.id && n.type !== "parallel" && n.type !== "loop").length === 0 && (
+                <p className="text-[10px] text-zinc-600 px-1">No other nodes in pipeline</p>
+              )}
+            </div>
+            <p className="mt-1 text-[10px] text-zinc-600">
+              {isLoop(node.type)
+                ? "Nodes to execute for each iteration"
+                : "Nodes to execute in parallel"}
+            </p>
           </div>
         )}
 
@@ -393,7 +525,7 @@ export default memo(function NodeConfig() {
         {!isComment(node.type) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
-              Timeout (seconds)
+              {isLoop(node.type) ? "Per-Iteration Timeout (seconds)" : "Timeout (seconds)"}
             </label>
             <input
               type="number"
@@ -403,6 +535,26 @@ export default memo(function NodeConfig() {
               placeholder="0 = no timeout"
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
             />
+          </div>
+        )}
+
+        {/* Total Loop Timeout */}
+        {isLoop(node.type) && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Total Loop Timeout (seconds)
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={loopTimeout}
+              onChange={(e) => setLoopTimeout(Number(e.target.value))}
+              placeholder="0 = no limit"
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+            />
+            <p className="mt-1 text-[10px] text-zinc-600">
+              Maximum wall-clock time for all iterations combined
+            </p>
           </div>
         )}
 

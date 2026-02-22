@@ -80,6 +80,75 @@ body,
   shape-rendering: geometricPrecision;
 }
 
+/* ── Node connection handles ── */
+
+/* Base handle sizing + transition (overrides React Flow defaults) */
+.af-handle.react-flow__handle {
+  width: 12px !important;
+  height: 12px !important;
+  border-width: 2px !important;
+  border-style: solid !important;
+  transition: opacity 150ms, border-color 150ms, background-color 150ms !important;
+}
+
+/* Connected handles — always fully visible */
+.af-handle-connected.react-flow__handle {
+  opacity: 1 !important;
+  border-color: #71717a !important;
+  background-color: #3f3f46 !important;
+}
+
+.af-handle-connected.react-flow__handle:hover {
+  border-color: #a1a1aa !important;
+  background-color: #52525b !important;
+}
+
+/* Unconnected handles — subtle by default */
+.af-handle-subtle.react-flow__handle {
+  opacity: 0.25 !important;
+  border-color: rgba(82, 82, 91, 0.4) !important;
+  background-color: rgba(63, 63, 70, 0.3) !important;
+}
+
+/* Node hover — unconnected handles become more visible */
+.group:hover > .af-handle-subtle.react-flow__handle {
+  opacity: 0.5 !important;
+  border-color: rgba(113, 113, 122, 0.6) !important;
+  background-color: rgba(63, 63, 70, 0.5) !important;
+}
+
+/* Handle hover — full visibility */
+.af-handle-subtle.react-flow__handle:hover {
+  opacity: 1 !important;
+  border-color: #a1a1aa !important;
+  background-color: #52525b !important;
+}
+
+/* Group child input handle — shows the synthetic edge anchor, non-interactive */
+.af-handle-child.react-flow__handle {
+  opacity: 0.5 !important;
+  border-color: rgba(236, 72, 153, 0.5) !important;   /* pink for loop parent */
+  background-color: rgba(236, 72, 153, 0.15) !important;
+  cursor: default !important;
+}
+
+/* Dragging a connection — show all handles except child handles (not valid targets) */
+.connecting-mode .af-handle.react-flow__handle:not(.af-handle-child) {
+  opacity: 1 !important;
+  border-color: #71717a !important;
+  background-color: #3f3f46 !important;
+}
+
+.connecting-mode .af-handle.react-flow__handle:not(.af-handle-child):hover {
+  border-color: #a1a1aa !important;
+  background-color: #52525b !important;
+}
+
+/* Child handles stay dim during connection drag — they aren't valid targets */
+.connecting-mode .af-handle-child.react-flow__handle {
+  opacity: 0.2 !important;
+}
+
 /* ── Running node glow ── */
 @keyframes running-glow {
   0%, 100% { box-shadow: 0 0 8px 2px rgba(96, 165, 250, 0.3); }
@@ -99,6 +168,49 @@ body,
   to {
     stroke-dashoffset: -10;
   }
+}
+
+/* Hidden handles for synthetic edge routing — invisible but functional as anchors */
+.af-handle-hidden.react-flow__handle {
+  width: 0 !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  opacity: 0 !important;
+  border: none !important;
+  pointer-events: none !important;
+}
+
+/* ── Node cursor ── */
+
+/* ── Hover focus: dim non-connected nodes/edges ── */
+.react-flow__node,
+.react-flow__edge path,
+.react-flow__edge marker polyline {
+  transition: opacity 0.35s ease-in-out;
+}
+.react-flow__node.af-dimmed {
+  opacity: 0.2 !important;
+  transition: opacity 0.35s ease-in-out;
+}
+.react-flow__node.af-highlighted {
+  opacity: 1 !important;
+  transition: opacity 0.35s ease-in-out;
+}
+.react-flow__edge.af-dimmed path,
+.react-flow__edge.af-dimmed marker polyline {
+  opacity: 0.1 !important;
+  transition: opacity 0.35s ease-in-out;
+}
+.react-flow__edge.af-dimmed .react-flow__edge-textbg,
+.react-flow__edge.af-dimmed .nodrag {
+  opacity: 0.1 !important;
+  transition: opacity 0.35s ease-in-out;
+}
+.react-flow__edge.af-highlighted path,
+.react-flow__edge.af-highlighted marker polyline {
+  opacity: 1 !important;
+  transition: opacity 0.35s ease-in-out;
 }
 
 /* ═══════════════════════════════════════════════
@@ -269,9 +381,16 @@ body,
 }
 
 /* Node connection handles — Surface 1 with Overlay border */
-[data-theme="light"] .react-flow__handle {
+[data-theme="light"] .af-handle-connected.react-flow__handle,
+[data-theme="light"] .connecting-mode .af-handle.react-flow__handle {
   background-color: #bcc0cc !important;
   border-color: #7c7f93 !important;
+}
+
+[data-theme="light"] .af-handle-connected.react-flow__handle:hover,
+[data-theme="light"] .connecting-mode .af-handle.react-flow__handle:hover {
+  background-color: #acb0be !important;
+  border-color: #6c6f85 !important;
 }
 
 /* ── Node Palette (bottom-left) ── */

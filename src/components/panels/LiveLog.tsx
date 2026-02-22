@@ -54,6 +54,50 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(2)}`;
 }
 
+/* ── Loop progress indicator ── */
+
+function LoopProgress({ logs, totalCost, loopStartCost }: { logs: string[]; totalCost: number; loopStartCost: number }) {
+  // Parse last iteration marker from logs (backward scan avoids array copy + reverse)
+  let lastMarker: string | undefined;
+  for (let i = logs.length - 1; i >= 0; i--) {
+    if (logs[i].startsWith("--- Loop iteration ")) {
+      lastMarker = logs[i];
+      break;
+    }
+  }
+  if (!lastMarker) return null;
+
+  const match = lastMarker.match(/Loop iteration (\d+)\/(\d+)/);
+  if (!match) return null;
+
+  const current = parseInt(match[1]);
+  const total = parseInt(match[2]);
+  const loopCost = totalCost - loopStartCost;
+  const costPerIter = current > 0 ? loopCost / current : 0;
+  const estimatedTotal = costPerIter * total;
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-1.5 text-xs border-b border-zinc-800/50 bg-pink-500/5">
+      <span className="text-pink-400 font-medium">Iteration {current}/{total}</span>
+      <span className="text-zinc-400">{formatCost(loopCost)} spent</span>
+      {current > 1 && (
+        <>
+          <span className="text-zinc-500">~{formatCost(costPerIter)}/iter</span>
+          <span className="text-amber-400">~{formatCost(estimatedTotal)} est. total</span>
+        </>
+      )}
+      <div className="flex-1">
+        <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-pink-500/60 transition-all duration-300"
+            style={{ width: `${Math.min(100, (current / total) * 100)}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Node row sub-component (allows hooks like useElapsed) ── */
 
 interface NodeRowProps {
@@ -66,9 +110,11 @@ interface NodeRowProps {
   isExpanded: boolean;
   onToggle: (nodeId: string) => void;
   activeLogRef: React.RefObject<HTMLPreElement | null>;
+  loopStartCost: number | null;
+  totalCost: number;
 }
 
-const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive, isHighlighted, isExpanded, onToggle, activeLogRef }: NodeRowProps) {
+const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive, isHighlighted, isExpanded, onToggle, activeLogRef, loopStartCost, totalCost }: NodeRowProps) {
   const status: NodeStatus = result?.status ?? "Pending";
   const hasDetails = !!result || nodeLogs.length > 0;
   // A node is "running" based on its own status (covers parallel children too)
@@ -136,6 +182,11 @@ const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive
         )}
       </div>
 
+      {/* Loop progress indicator */}
+      {isRunning && loopStartCost != null && (
+        <LoopProgress logs={nodeLogs} totalCost={totalCost} loopStartCost={loopStartCost} />
+      )}
+
       {/* Expanded details */}
       {isExpanded && (
         <>
@@ -193,7 +244,9 @@ const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive
   prev.nodeLogs === next.nodeLogs &&
   prev.isActive === next.isActive &&
   prev.isHighlighted === next.isHighlighted &&
-  prev.isExpanded === next.isExpanded
+  prev.isExpanded === next.isExpanded &&
+  prev.loopStartCost === next.loopStartCost &&
+  prev.totalCost === next.totalCost
 );
 
 /* ── Main LiveLog component ── */
@@ -211,6 +264,7 @@ export default memo(function LiveLog() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const lastRunInputs = useRunStore((s) => s.lastRunInputs);
   const approvalResponse = useRunStore((s) => s.approvalResponse);
+  const loopCostSnapshot = useRunStore((s) => s.loopCostSnapshot);
   const logEndRef = useRef<HTMLDivElement>(null);
   const activeLogRef = useRef<HTMLPreElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -466,6 +520,8 @@ export default memo(function LiveLog() {
               isExpanded={expandedNodes.has(nodeId)}
               onToggle={toggleExpanded}
               activeLogRef={activeLogRef}
+              loopStartCost={loopCostSnapshot[nodeId] ?? null}
+              totalCost={runState.total_cost_usd}
             />
           ))}
           <div ref={logEndRef} />

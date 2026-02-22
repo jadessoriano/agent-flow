@@ -253,6 +253,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       shell: "Shell Command",
       git: "Git Operation",
       parallel: "Parallel Group",
+      loop: "Loop",
       "approval-gate": "Approval Gate",
       "sub-pipeline": "Sub-pipeline",
       comment: "Comment",
