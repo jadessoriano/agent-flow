@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { usePipelineStore } from "../../stores/pipelineStore";
 
-export default function EdgeConfig() {
+export default memo(function EdgeConfig() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const selectedEdgeId = usePipelineStore((s) => s.selectedEdgeId);
   const updateEdge = usePipelineStore((s) => s.updateEdge);
@@ -130,4 +130,4 @@ export default function EdgeConfig() {
       </div>
     </div>
   );
-}
+});

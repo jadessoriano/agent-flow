@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, memo } from "react";
 import { getUsageStats } from "../../lib/tauri";
 import type { UsageStats } from "../../types/run";
 import { formatMs } from "../../lib/format";
@@ -23,7 +23,7 @@ function formatTime(iso: string): string {
   }
 }
 
-export default function CostDashboard() {
+export default memo(function CostDashboard() {
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -222,4 +222,4 @@ export default function CostDashboard() {
       </div>
     </div>
   );
-}
+});

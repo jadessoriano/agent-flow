@@ -42,6 +42,19 @@ pub struct RunState {
     pub total_cost_usd: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunStateDelta {
+    pub run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_node: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_result: Option<NodeResult>,
+}
+
 pub struct ActiveRun {
     pub state: RunState,
     pub cancelled: bool,
@@ -169,6 +182,26 @@ fn emit_run_update(app: &AppHandle, state: &RunState) {
     let _ = app.emit("run-update", state.clone());
 }
 
+fn emit_run_delta(app: &AppHandle, delta: RunStateDelta) {
+    let _ = app.emit("run-update-delta", delta);
+}
+
+fn node_delta(
+    run_id: &str,
+    nr: NodeResult,
+    status: Option<&str>,
+    current_node: Option<Option<String>>,
+    cost: Option<f64>,
+) -> RunStateDelta {
+    RunStateDelta {
+        run_id: run_id.to_string(),
+        status: status.map(|s| s.to_string()),
+        current_node,
+        total_cost_usd: cost,
+        node_result: Some(nr),
+    }
+}
+
 fn emit_node_log(app: &AppHandle, run_id: &str, node_id: &str, line: &str) {
     let _ = app.emit(
         "node-log",
@@ -186,13 +219,13 @@ fn emit_node_log_batch(app: &AppHandle, run_id: &str, node_id: &str, lines: Vec<
     );
 }
 
-fn hash_instructions(instructions: &str) -> String {
+pub fn hash_instructions(instructions: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(instructions.as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
-fn hash_pipeline(pipeline: &Pipeline) -> String {
+pub fn hash_pipeline(pipeline: &Pipeline) -> String {
     let mut hasher = Sha256::new();
     let mut sorted: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
     for node in &pipeline.nodes {
@@ -234,7 +267,7 @@ fn to_env_var_name(s: &str) -> String {
 
 /// Parse structured outputs from AI node output.
 /// Looks for a `--- OUTPUTS ---` marker followed by a JSON object.
-fn parse_structured_outputs(output: &str) -> Option<HashMap<String, String>> {
+pub fn parse_structured_outputs(output: &str) -> Option<HashMap<String, String>> {
     let marker = "--- OUTPUTS ---";
     let idx = output.rfind(marker)?;
     let after = output[idx + marker.len()..].trim();
@@ -262,7 +295,7 @@ fn parse_structured_outputs(output: &str) -> Option<HashMap<String, String>> {
     Some(map)
 }
 
-fn parse_cost_from_stderr(lines: &[String]) -> Option<f64> {
+pub fn parse_cost_from_stderr(lines: &[String]) -> Option<f64> {
     for line in lines.iter().rev() {
         let lower = line.to_lowercase();
 
@@ -771,11 +804,17 @@ async fn execute_node(
         // Skip when using --continue since Claude already has this context from the prior turn.
         if !continue_session {
             let mut upstream_parts = Vec::new();
+            let max_context = 4096;
             for edge in pipeline_edges {
                 if edge.to == node.id {
                     if let Some(output) = node_outputs.get(&edge.from) {
                         if !output.is_empty() {
-                            upstream_parts.push(format!("[{}]:\n{}", edge.from, output));
+                            let trimmed = if output.len() > max_context {
+                                format!("[truncated]\n{}", &output[output.len() - max_context..])
+                            } else {
+                                output.clone()
+                            };
+                            upstream_parts.push(format!("[{}]:\n{}", edge.from, trimmed));
                         }
                     }
                 }
@@ -791,11 +830,11 @@ async fn execute_node(
             let json_template: String = node
                 .outputs
                 .iter()
-                .map(|k| format!("  \"{}\": \"<value>\"", k))
+                .map(|k| format!("\"{}\": \"...\"", k))
                 .collect::<Vec<_>>()
-                .join(",\n");
+                .join(", ");
             instructions.push_str(&format!(
-                "\n\nIMPORTANT: At the very end of your response, output your results in this exact JSON format:\n--- OUTPUTS ---\n{{\n{}\n}}",
+                "\n\nAt the end, output:\n--- OUTPUTS ---\n{{{}}}",
                 json_template
             ));
         }
@@ -952,7 +991,7 @@ async fn execute_node(
     unreachable!()
 }
 
-fn should_execute_edge(condition: &Option<String>, prev_status: &NodeStatus) -> bool {
+pub fn should_execute_edge(condition: &Option<String>, prev_status: &NodeStatus) -> bool {
     match condition {
         None => true, // No condition = always fire regardless of predecessor status
         Some(c) if c == "success" => *prev_status == NodeStatus::Success,
@@ -965,7 +1004,7 @@ fn should_execute_edge(condition: &Option<String>, prev_status: &NodeStatus) -> 
 /// Detect back edges in the pipeline graph using DFS with WHITE/GRAY/BLACK coloring.
 /// A back edge is one that points to a node currently on the DFS stack (GRAY),
 /// which means it creates a cycle. These must be excluded from topological sort.
-fn find_back_edges(pipeline: &Pipeline) -> HashSet<(String, String)> {
+pub fn find_back_edges(pipeline: &Pipeline) -> HashSet<(String, String)> {
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     let node_ids: HashSet<String> = pipeline.nodes.iter().map(|n| n.id.clone()).collect();
 
@@ -1051,7 +1090,7 @@ fn find_back_edges(pipeline: &Pipeline) -> HashSet<(String, String)> {
 /// Build topological execution order, excluding back edges from in-degree computation.
 /// Returns (execution_levels, back_edges) where back_edges are cycle-creating edges
 /// that should be handled separately via re-queuing in run_pipeline_loop.
-fn build_execution_order(pipeline: &Pipeline) -> (Vec<Vec<String>>, HashSet<(String, String)>) {
+pub fn build_execution_order(pipeline: &Pipeline) -> (Vec<Vec<String>>, HashSet<(String, String)>) {
     let back_edges = find_back_edges(pipeline);
 
     let mut in_degree: HashMap<String, usize> = HashMap::new();
@@ -1248,10 +1287,11 @@ async fn run_pipeline_loop(
                         .await;
 
                         {
+                            let delta_nr = prior.clone();
                             let mut guard = active_run.lock().await;
                             if let Some(run) = guard.as_mut() {
                                 run.state.node_results.insert(node_id.clone(), prior.clone());
-                                emit_run_update(app, &run.state);
+                                emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                             }
                         }
                         continue;
@@ -1300,10 +1340,11 @@ async fn run_pipeline_loop(
                     }
 
                     {
+                        let delta_nr = result.clone();
                         let mut guard = active_run.lock().await;
                         if let Some(run) = guard.as_mut() {
                             run.state.node_results.insert(node_id.clone(), result);
-                            emit_run_update(app, &run.state);
+                            emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                         }
                     }
                     continue;
@@ -1360,10 +1401,11 @@ async fn run_pipeline_loop(
                     let _ = db::insert_run_step(pool, run_id, node_id, &node.name, "Success", 1, &cache_key).await;
 
                     {
+                        let delta_nr = result.clone();
                         let mut guard = active_run.lock().await;
                         if let Some(run) = guard.as_mut() {
                             run.state.node_results.insert(node_id.clone(), result);
-                            emit_run_update(app, &run.state);
+                            emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                         }
                     }
                     continue;
@@ -1379,21 +1421,19 @@ async fn run_pipeline_loop(
                         let mut guard = active_run.lock().await;
                         if let Some(run) = guard.as_mut() {
                             for cid in children {
-                                run.state.node_results.insert(
-                                    cid.clone(),
-                                    NodeResult {
-                                        node_id: cid.clone(),
-                                        status: NodeStatus::Running,
-                                        exit_code: None,
-                                        output: String::new(),
-                                        started_at: Some(now_iso()),
-                                        finished_at: None,
-                                        attempt: 1,
-                                        cost_usd: None,
-                                    },
-                                );
+                                let nr = NodeResult {
+                                    node_id: cid.clone(),
+                                    status: NodeStatus::Running,
+                                    exit_code: None,
+                                    output: String::new(),
+                                    started_at: Some(now_iso()),
+                                    finished_at: None,
+                                    attempt: 1,
+                                    cost_usd: None,
+                                };
+                                run.state.node_results.insert(cid.clone(), nr.clone());
+                                emit_run_delta(app, node_delta(run_id, nr, None, None, None));
                             }
-                            emit_run_update(app, &run.state);
                         }
                     }
                     for cid in children {
@@ -1441,10 +1481,11 @@ async fn run_pipeline_loop(
                             cost_usd: None,
                         };
                         results.insert(node_id.clone(), result.clone());
+                        let delta_nr = result.clone();
                         let mut guard = active_run.lock().await;
                         if let Some(run) = guard.as_mut() {
                             run.state.node_results.insert(node_id.clone(), result);
-                            emit_run_update(app, &run.state);
+                            emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                         }
                         continue;
                     }
@@ -1470,10 +1511,11 @@ async fn run_pipeline_loop(
                         cost_usd: None,
                     };
                     results.insert(node_id.clone(), result.clone());
+                    let delta_nr = result.clone();
                     let mut guard = active_run.lock().await;
                     if let Some(run) = guard.as_mut() {
                         run.state.node_results.insert(node_id.clone(), result);
-                        emit_run_update(app, &run.state);
+                        emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                     }
                     continue;
                 }
@@ -1496,10 +1538,11 @@ async fn run_pipeline_loop(
                                 cost_usd: None,
                             };
                             results.insert(node_id.clone(), result.clone());
+                            let delta_nr = result.clone();
                             let mut guard = active_run.lock().await;
                             if let Some(run) = guard.as_mut() {
                                 run.state.node_results.insert(node_id.clone(), result);
-                                emit_run_update(app, &run.state);
+                                emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                             }
                             continue;
                         }
@@ -1507,23 +1550,21 @@ async fn run_pipeline_loop(
 
                 // Emit running status for the sub-pipeline node
                 {
+                    let nr = NodeResult {
+                        node_id: node_id.clone(),
+                        status: NodeStatus::Running,
+                        exit_code: None,
+                        output: format!("Executing sub-pipeline '{}'", pipeline_ref),
+                        started_at: Some(now_iso()),
+                        finished_at: None,
+                        attempt: 1,
+                        cost_usd: None,
+                    };
                     let mut guard = active_run.lock().await;
                     if let Some(run) = guard.as_mut() {
                         run.state.current_node = Some(node_id.clone());
-                        run.state.node_results.insert(
-                            node_id.clone(),
-                            NodeResult {
-                                node_id: node_id.clone(),
-                                status: NodeStatus::Running,
-                                exit_code: None,
-                                output: format!("Executing sub-pipeline '{}'", pipeline_ref),
-                                started_at: Some(now_iso()),
-                                finished_at: None,
-                                attempt: 1,
-                                cost_usd: None,
-                            },
-                        );
-                        emit_run_update(app, &run.state);
+                        run.state.node_results.insert(node_id.clone(), nr.clone());
+                        emit_run_delta(app, node_delta(run_id, nr, None, Some(Some(node_id.clone())), None));
                     }
                 }
 
@@ -1613,6 +1654,7 @@ async fn run_pipeline_loop(
 
                 results.insert(node_id.clone(), result.clone());
                 {
+                    let delta_nr = result.clone();
                     let mut guard = active_run.lock().await;
                     if let Some(run) = guard.as_mut() {
                         run.state.node_results.insert(node_id.clone(), result);
@@ -1623,7 +1665,7 @@ async fn run_pipeline_loop(
                             .filter_map(|r| r.cost_usd)
                             .sum();
                         // Budget check after sub-pipeline
-                        if let Some(limit) = pipeline.max_cost_usd {
+                        let budget_status = if let Some(limit) = pipeline.max_cost_usd {
                             if run.state.total_cost_usd > limit {
                                 emit_node_log(
                                     app, run_id, node_id,
@@ -1632,9 +1674,14 @@ async fn run_pipeline_loop(
                                 run.cancelled = true;
                                 let _ = run.cancel_tx.send(true);
                                 run.state.status = "budget_exceeded".to_string();
+                                Some("budget_exceeded")
+                            } else {
+                                None
                             }
-                        }
-                        emit_run_update(app, &run.state);
+                        } else {
+                            None
+                        };
+                        emit_run_delta(app, node_delta(run_id, delta_nr, budget_status, None, Some(run.state.total_cost_usd)));
                     }
                 }
                 continue;
@@ -1642,23 +1689,21 @@ async fn run_pipeline_loop(
 
             // Emit running status
             {
+                let nr = NodeResult {
+                    node_id: node_id.clone(),
+                    status: NodeStatus::Running,
+                    exit_code: None,
+                    output: String::new(),
+                    started_at: Some(now_iso()),
+                    finished_at: None,
+                    attempt: 1,
+                    cost_usd: None,
+                };
                 let mut guard = active_run.lock().await;
                 if let Some(run) = guard.as_mut() {
                     run.state.current_node = Some(node_id.clone());
-                    run.state.node_results.insert(
-                        node_id.clone(),
-                        NodeResult {
-                            node_id: node_id.clone(),
-                            status: NodeStatus::Running,
-                            exit_code: None,
-                            output: String::new(),
-                            started_at: Some(now_iso()),
-                            finished_at: None,
-                            attempt: 1,
-                            cost_usd: None,
-                        },
-                    );
-                    emit_run_update(app, &run.state);
+                    run.state.node_results.insert(node_id.clone(), nr.clone());
+                    emit_run_delta(app, node_delta(run_id, nr, None, Some(Some(node_id.clone())), None));
                 }
             }
 
@@ -1842,6 +1887,7 @@ async fn run_pipeline_loop(
                 }
 
                 results.insert(result.node_id.clone(), result.clone());
+                let delta_nr = result.clone();
                 let mut guard = active_run.lock().await;
                 if let Some(run) = guard.as_mut() {
                     run.state
@@ -1855,7 +1901,7 @@ async fn run_pipeline_loop(
                         .filter_map(|r| r.cost_usd)
                         .sum();
                     // Budget check
-                    if let Some(limit) = pipeline.max_cost_usd {
+                    let budget_status = if let Some(limit) = pipeline.max_cost_usd {
                         if run.state.total_cost_usd > limit {
                             emit_node_log(
                                 app, run_id, &run.state.current_node.clone().unwrap_or_default(),
@@ -1864,9 +1910,14 @@ async fn run_pipeline_loop(
                             run.cancelled = true;
                             let _ = run.cancel_tx.send(true);
                             run.state.status = "budget_exceeded".to_string();
+                            Some("budget_exceeded")
+                        } else {
+                            None
                         }
-                    }
-                    emit_run_update(app, &run.state);
+                    } else {
+                        None
+                    };
+                    emit_run_delta(app, node_delta(run_id, delta_nr, budget_status, None, Some(run.state.total_cost_usd)));
                 }
             }
         }
@@ -1902,10 +1953,11 @@ async fn run_pipeline_loop(
                         cost_usd: None,
                     };
                     results.insert(node_id.clone(), gr.clone());
+                    let delta_nr = gr.clone();
                     let mut guard = active_run.lock().await;
                     if let Some(run) = guard.as_mut() {
                         run.state.node_results.insert(node_id.clone(), gr);
-                        emit_run_update(app, &run.state);
+                        emit_run_delta(app, node_delta(run_id, delta_nr, None, None, None));
                     }
                 }
             }
@@ -1997,23 +2049,21 @@ async fn run_pipeline_loop(
 
                 // Emit running status
                 {
+                    let nr = NodeResult {
+                        node_id: node_id.clone(),
+                        status: NodeStatus::Running,
+                        exit_code: None,
+                        output: String::new(),
+                        started_at: Some(now_iso()),
+                        finished_at: None,
+                        attempt: 1,
+                        cost_usd: None,
+                    };
                     let mut guard = active_run.lock().await;
                     if let Some(run) = guard.as_mut() {
                         run.state.current_node = Some(node_id.clone());
-                        run.state.node_results.insert(
-                            node_id.clone(),
-                            NodeResult {
-                                node_id: node_id.clone(),
-                                status: NodeStatus::Running,
-                                exit_code: None,
-                                output: String::new(),
-                                started_at: Some(now_iso()),
-                                finished_at: None,
-                                attempt: 1,
-                                cost_usd: None,
-                            },
-                        );
-                        emit_run_update(app, &run.state);
+                        run.state.node_results.insert(node_id.clone(), nr.clone());
+                        emit_run_delta(app, node_delta(run_id, nr, None, Some(Some(node_id.clone())), None));
                     }
                 }
 
@@ -2126,12 +2176,13 @@ async fn run_pipeline_loop(
                     }
 
                     results.insert(result.node_id.clone(), result.clone());
+                    let delta_nr = result.clone();
                     let mut guard = active_run.lock().await;
                     if let Some(run) = guard.as_mut() {
                         run.state.node_results.insert(result.node_id.clone(), result);
                         run.state.total_cost_usd = run.state.node_results.values().filter_map(|r| r.cost_usd).sum();
                         // Budget check in requeue loop
-                        if let Some(limit) = pipeline.max_cost_usd {
+                        let budget_status = if let Some(limit) = pipeline.max_cost_usd {
                             if run.state.total_cost_usd > limit {
                                 emit_node_log(
                                     app, run_id, &run.state.current_node.clone().unwrap_or_default(),
@@ -2140,9 +2191,14 @@ async fn run_pipeline_loop(
                                 run.cancelled = true;
                                 let _ = run.cancel_tx.send(true);
                                 run.state.status = "budget_exceeded".to_string();
+                                Some("budget_exceeded")
+                            } else {
+                                None
                             }
-                        }
-                        emit_run_update(app, &run.state);
+                        } else {
+                            None
+                        };
+                        emit_run_delta(app, node_delta(run_id, delta_nr, budget_status, None, Some(run.state.total_cost_usd)));
                     }
                 }
             }

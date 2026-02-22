@@ -28,4 +28,8 @@ export default defineConfig(async () => ({
     globals: true,
     environment: "node",
   },
+  benchmark: {
+    globals: true,
+    environment: "node",
+  },
 }));

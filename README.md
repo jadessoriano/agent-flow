@@ -17,17 +17,20 @@ AgentFlow is a GUI layer on top of what Claude Code already supports — agents 
   - **Sub-pipeline** — call another pipeline as a nested workflow
 - Conditional edges (success/failure branching)
 - Auto-layout with dagre positioning
+- Undo/redo for node drags and auto-layout (Ctrl+Z / Ctrl+Shift+Z)
 
 ### Pipeline Execution
 - One-click pipeline runs with real-time canvas status animations
-- Streaming log output per node
+- Streaming log output per node with "Latest" button navigation
 - Cancel running pipelines at any time
 - Resume failed pipelines from the point of failure
 - Retry policies with configurable max attempts and delay
 - Per-node timeout support
+- Run results scoped to their pipeline — switching pipelines preserves state
 
 ### Cost & Performance Tracking
 - Per-node and per-run token cost estimation (USD)
+- Pre-run cost estimation based on historical averages
 - Cost dashboard with aggregate stats: total spend, top pipelines, top nodes
 - Execution duration displayed across all UI surfaces
 - Per-node model selection (Opus, Sonnet, Haiku)
@@ -41,6 +44,9 @@ AgentFlow is a GUI layer on top of what Claude Code already supports — agents 
 - `React.memo` on canvas nodes and log rows prevents cascading re-renders
 - `tokio::sync::watch` channel for zero-cost cancellation instead of mutex polling
 - `JoinSet` processes parallel child results in completion order
+- In-memory layout cache eliminates repeated localStorage JSON parsing
+- Run history output stripping — metadata preserved, heavy strings dropped
+- Memory-bounded stores verified by automated tests (undo: 30, history: 10, logs: 2000/node)
 
 ### Agent Library
 - Browse, search, and manage `.claude/agents/*.md` files

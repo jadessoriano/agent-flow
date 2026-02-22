@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, memo } from "react";
 import { useRunStore } from "../../stores/runStore";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -24,11 +24,12 @@ function formatTime(iso: string): string {
 type StatusFilter = "all" | "success" | "failed" | "cancelled";
 type DateFilter = "all" | "today" | "week" | "month";
 
-export default function RunHistory() {
+export default memo(function RunHistory() {
   const runHistory = useRunStore((s) => s.runHistory);
   const persistedHistory = useRunStore((s) => s.persistedHistory);
   const running = useRunStore((s) => s.running);
   const resumeRun = useRunStore((s) => s.resumeRun);
+  const lastRunInputs = useRunStore((s) => s.lastRunInputs);
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const settings = useSettingsStore((s) => s.settings);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -37,55 +38,53 @@ export default function RunHistory() {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
 
   // Merge in-memory and persisted history, deduplicate by run_id
-  const seen = new Set<string>();
-  const allRuns: Array<{ type: "memory"; data: (typeof runHistory)[0] } | { type: "persisted"; data: RunRow }> = [];
+  const allRuns = useMemo(() => {
+    const seen = new Set<string>();
+    const runs: Array<{ type: "memory"; data: (typeof runHistory)[0] } | { type: "persisted"; data: RunRow }> = [];
 
-  for (const run of runHistory) {
-    if (!seen.has(run.run_id)) {
-      seen.add(run.run_id);
-      allRuns.push({ type: "memory", data: run });
-    }
-  }
-  for (const run of persistedHistory) {
-    if (!seen.has(run.id)) {
-      seen.add(run.id);
-      allRuns.push({ type: "persisted", data: run });
-    }
-  }
-
-  // Apply filters
-  const now = new Date();
-  const filteredRuns = allRuns.filter((entry) => {
-    const status = entry.type === "memory" ? entry.data.status : entry.data.status;
-    const pName = entry.type === "memory" ? entry.data.pipeline_name : entry.data.pipeline_name;
-    const startedAt = entry.type === "persisted" ? entry.data.started_at : null;
-
-    if (statusFilter !== "all" && status !== statusFilter) return false;
-    if (pipelineFilter && !pName.toLowerCase().includes(pipelineFilter.toLowerCase())) return false;
-    if (dateFilter !== "all" && startedAt) {
-      const d = new Date(startedAt);
-      if (dateFilter === "today") {
-        if (d.toDateString() !== now.toDateString()) return false;
-      } else if (dateFilter === "week") {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        if (d < weekAgo) return false;
-      } else if (dateFilter === "month") {
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        if (d < monthAgo) return false;
+    for (const run of runHistory) {
+      if (!seen.has(run.run_id)) {
+        seen.add(run.run_id);
+        runs.push({ type: "memory", data: run });
       }
     }
-    return true;
-  });
+    for (const run of persistedHistory) {
+      if (!seen.has(run.id)) {
+        seen.add(run.id);
+        runs.push({ type: "persisted", data: run });
+      }
+    }
+    return runs;
+  }, [runHistory, persistedHistory]);
 
-  if (allRuns.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center p-4 text-sm text-zinc-500">
-        No run history yet. Run a pipeline to see results here.
-      </div>
-    );
-  }
+  // Apply filters — precompute date thresholds once instead of per-row
+  const filteredRuns = useMemo(() => {
+    const nowMs = Date.now();
+    const todayStr = dateFilter === "today" ? new Date(nowMs).toDateString() : "";
+    const weekAgoMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+    const monthAgoMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+    const lowerFilter = pipelineFilter.toLowerCase();
 
-  const lastRunInputs = useRunStore((s) => s.lastRunInputs);
+    return allRuns.filter((entry) => {
+      const status = entry.data.status;
+      const pName = entry.data.pipeline_name;
+      const startedAt = entry.type === "persisted" ? entry.data.started_at : null;
+
+      if (statusFilter !== "all" && status !== statusFilter) return false;
+      if (lowerFilter && !pName.toLowerCase().includes(lowerFilter)) return false;
+      if (dateFilter !== "all" && startedAt) {
+        const dMs = new Date(startedAt).getTime();
+        if (dateFilter === "today") {
+          if (new Date(dMs).toDateString() !== todayStr) return false;
+        } else if (dateFilter === "week") {
+          if (dMs < weekAgoMs) return false;
+        } else if (dateFilter === "month") {
+          if (dMs < monthAgoMs) return false;
+        }
+      }
+      return true;
+    });
+  }, [allRuns, statusFilter, pipelineFilter, dateFilter]);
 
   const parseInputs = (triggerInput: string | null): Record<string, string> => {
     if (!triggerInput) return {};
@@ -137,6 +136,14 @@ export default function RunHistory() {
       addToast("Failed to export run report", "warning");
     }
   };
+
+  if (allRuns.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-sm text-zinc-500">
+        No run history yet. Run a pipeline to see results here.
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -309,4 +316,4 @@ export default function RunHistory() {
       </div>
     </div>
   );
-}
+});

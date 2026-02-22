@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { listSecrets, setSecret, deleteSecret } from "../../lib/tauri";
 import type { PipelineVariables } from "../../types/pipeline";
 
-export default function PipelineSettings() {
+export default memo(function PipelineSettings() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const updatePipelineMeta = usePipelineStore((s) => s.updatePipelineMeta);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -314,4 +314,4 @@ export default function PipelineSettings() {
       </div>
     </div>
   );
-}
+});

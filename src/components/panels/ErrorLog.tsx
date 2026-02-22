@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { useErrorLogStore } from "../../stores/errorLogStore";
 import { buildGitHubIssueUrl, formatErrorsForExport } from "../../lib/errorReporter";
 
@@ -8,7 +8,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ErrorLog() {
+export default memo(function ErrorLog() {
   const sessionErrors = useErrorLogStore((s) => s.sessionErrors);
   const fileEntries = useErrorLogStore((s) => s.fileEntries);
   const logPath = useErrorLogStore((s) => s.logPath);
@@ -174,4 +174,4 @@ export default function ErrorLog() {
       </div>
     </div>
   );
-}
+});

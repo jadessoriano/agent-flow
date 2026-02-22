@@ -1,9 +1,9 @@
 mod agent_manager;
 mod db;
 mod error_log;
-mod executor;
+pub mod executor;
 mod git_watcher;
-mod pipeline_engine;
+pub mod pipeline_engine;
 mod project_manager;
 mod secrets;
 mod settings;

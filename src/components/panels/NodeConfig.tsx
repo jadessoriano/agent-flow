@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
 import { marked } from "marked";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useAgentStore } from "../../stores/agentStore";
@@ -10,7 +10,7 @@ const isSubPipeline = (type: string) => type === "sub-pipeline";
 const isComment = (type: string) => type === "comment";
 const isCodeNode = (type: string) => type === "shell" || type === "git";
 
-export default function NodeConfig() {
+export default memo(function NodeConfig() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const selectedNodeId = usePipelineStore((s) => s.selectedNodeId);
   const updateNode = usePipelineStore((s) => s.updateNode);
@@ -444,4 +444,4 @@ export default function NodeConfig() {
       </div>
     </div>
   );
-}
+});

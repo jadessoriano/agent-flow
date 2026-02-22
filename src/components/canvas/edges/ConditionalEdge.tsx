@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -42,7 +43,7 @@ function getBackwardEdgePath(
   return [path, midX, topY];
 }
 
-export default function ConditionalEdge({
+function ConditionalEdge({
   id,
   sourceX,
   sourceY,
@@ -138,3 +139,16 @@ export default function ConditionalEdge({
     </>
   );
 }
+
+export default memo(ConditionalEdge, (prev, next) =>
+  prev.id === next.id &&
+  prev.sourceX === next.sourceX &&
+  prev.sourceY === next.sourceY &&
+  prev.targetX === next.targetX &&
+  prev.targetY === next.targetY &&
+  prev.sourcePosition === next.sourcePosition &&
+  prev.targetPosition === next.targetPosition &&
+  (prev.data as ConditionalEdgeData | undefined)?.condition ===
+    (next.data as ConditionalEdgeData | undefined)?.condition &&
+  prev.selected === next.selected
+);

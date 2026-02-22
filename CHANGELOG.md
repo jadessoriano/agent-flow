@@ -5,6 +5,34 @@ All notable changes to AgentFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-02-22
+
+### Added
+
+- **Undo/redo for node drags** — Ctrl+Z reverts node position changes; undo snapshots captured on drag start and auto-layout
+- **Undo/redo for auto-layout** — auto-layout now pushes an undo snapshot before rearranging nodes
+- **Latest button in Run Output** — always-visible button scrolls to, expands, and highlights the most recent node with results
+- **Memory bounds test suite** — 10 automated tests verify undo stack, run history, log caps, and output stripping hold under stress
+
+### Fixed
+
+- **Run state leaking across pipelines** — Canvas and LiveLog now check `runState.pipeline_name` matches current pipeline before showing results
+- **React hooks ordering crash** — moved `useMemo` above early return in LiveLog to prevent "rendered more hooks than previous render" error
+- **Undo not restoring node positions** — undo/redo now writes restored positions back to layout cache instead of reading stale cached positions
+
+### Performance
+
+- **Layout cache in-memory caching** — `getCachedLayout` no longer re-parses the entire localStorage JSON on every call; reads from an in-memory cache updated on write
+- **Eliminated duplicate cache reads** — Canvas sync effect reuses cached positions from useMemo instead of re-reading layout cache
+- **MiniMap color map extracted** — static module-level constant and stable function reference; no per-node allocation per render
+- **Run history output stripping** — `stripForHistory()` removes node output strings before storing in history (metadata preserved)
+- **Run history cap reduced** — in-memory history capped at 10 (down from 50); DB already persists full history
+
+### Changed
+
+- Removed auto-scroll from LiveLog — replaced with manual "Latest" button (better UX for reviewing completed runs)
+- Removed light theme option from Settings (dark-only for now)
+
 ## [0.2.1] - 2026-02-22
 
 ### Added

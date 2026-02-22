@@ -1,15 +1,28 @@
 import { create } from "zustand";
 import type {
   RunState,
+  RunStateDelta,
+  NodeResult,
   NodeLogEvent,
   NodeLogBatchEvent,
   ApprovalRequest,
   RunRow,
 } from "../types/run";
 import * as api from "../lib/tauri";
+import { clearDurationCache } from "../lib/format";
 import type { Pipeline } from "../types/pipeline";
 
 let approvalTimer: ReturnType<typeof setTimeout> | null = null;
+let historyDebounce: ReturnType<typeof setTimeout> | null = null;
+
+/** Strip heavy output strings from a RunState before storing in history. */
+function stripForHistory(state: RunState): RunState {
+  const stripped: Record<string, NodeResult> = {};
+  for (const [id, r] of Object.entries(state.node_results)) {
+    stripped[id] = { ...r, output: "" };
+  }
+  return { ...state, node_results: stripped };
+}
 
 interface RunStoreState {
   runState: RunState | null;
@@ -38,6 +51,7 @@ interface RunStoreState {
     projectPath: string,
   ) => Promise<void>;
   handleRunUpdate: (state: RunState) => void;
+  handleRunDelta: (delta: RunStateDelta) => void;
   handleNodeLog: (event: NodeLogEvent) => void;
   handleNodeLogBatch: (event: NodeLogBatchEvent) => void;
   handleApprovalRequest: (req: ApprovalRequest) => void;
@@ -107,12 +121,43 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
       runState: state,
       running: !isFinished,
       runHistory: isFinished
-        ? [state, ...s.runHistory].slice(0, 50)
+        ? [stripForHistory(state), ...s.runHistory].slice(0, 10)
         : s.runHistory,
     }));
-    // Refresh persisted history when a run finishes
+    // Refresh persisted history when a run finishes (debounced)
     if (isFinished) {
-      get().loadHistory();
+      if (historyDebounce) clearTimeout(historyDebounce);
+      historyDebounce = setTimeout(() => { historyDebounce = null; get().loadHistory(); }, 500);
+    }
+  },
+
+  handleRunDelta: (delta: RunStateDelta) => {
+    set((s) => {
+      if (!s.runState || s.runState.run_id !== delta.run_id) return {};
+      // Mutate node_results in-place to avoid O(N) spread per delta.
+      // This is safe because each RunState object is a unique reference
+      // created by this store, and Zustand triggers re-renders on the
+      // outer runState reference change (which we always produce below).
+      if (delta.node_result) {
+        s.runState.node_results[delta.node_result.node_id] = delta.node_result;
+      }
+      const updated: RunState = {
+        ...s.runState,
+        status: delta.status ?? s.runState.status,
+        current_node: delta.current_node !== undefined ? delta.current_node : s.runState.current_node,
+        total_cost_usd: delta.total_cost_usd ?? s.runState.total_cost_usd,
+      };
+      const isFinished = ["success", "failed", "cancelled", "budget_exceeded"].includes(updated.status);
+      return {
+        runState: updated,
+        running: !isFinished,
+        runHistory: isFinished ? [stripForHistory(updated), ...s.runHistory].slice(0, 10) : s.runHistory,
+      };
+    });
+    const current = get().runState;
+    if (current && ["success", "failed", "cancelled", "budget_exceeded"].includes(current.status)) {
+      if (historyDebounce) clearTimeout(historyDebounce);
+      historyDebounce = setTimeout(() => { historyDebounce = null; get().loadHistory(); }, 500);
     }
   },
 
@@ -154,6 +199,7 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   },
 
   clearRun: () => {
+    clearDurationCache();
     set({ runState: null, logs: {}, approvalRequest: null });
   },
 

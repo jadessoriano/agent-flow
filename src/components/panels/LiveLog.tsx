@@ -1,10 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRunStore } from "../../stores/runStore";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import type { NodeStatus, NodeResult } from "../../types/run";
 import { formatDuration } from "../../lib/format";
+import VirtualLogPane from "./VirtualLogPane";
 
 /** Hook that returns elapsed seconds since `startIso`, ticking every second while active. */
 function useElapsed(startIso: string | null | undefined, active: boolean): number | null {
@@ -55,20 +56,19 @@ function formatCost(cost: number): string {
 
 /* ── Node row sub-component (allows hooks like useElapsed) ── */
 
-const MAX_VISIBLE_LOGS = 200;
-
 interface NodeRowProps {
   nodeId: string;
   name: string;
   result: NodeResult | undefined;
   nodeLogs: string[];
   isActive: boolean;
+  isHighlighted: boolean;
   isExpanded: boolean;
   onToggle: (nodeId: string) => void;
   activeLogRef: React.RefObject<HTMLPreElement | null>;
 }
 
-const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive, isExpanded, onToggle, activeLogRef }: NodeRowProps) {
+const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive, isHighlighted, isExpanded, onToggle, activeLogRef }: NodeRowProps) {
   const status: NodeStatus = result?.status ?? "Pending";
   const hasDetails = !!result || nodeLogs.length > 0;
   // A node is "running" based on its own status (covers parallel children too)
@@ -78,12 +78,12 @@ const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive
   const elapsed = useElapsed(result?.started_at, isRunning);
 
   return (
-    <div className="border-b border-zinc-800">
+    <div className="border-b border-zinc-800" data-node-id={nodeId}>
       {/* Node header - clickable to expand */}
       <div
         onClick={() => hasDetails && onToggle(nodeId)}
         className={`flex items-center gap-2 px-4 py-2 ${
-          isActive ? "bg-zinc-800/50" : ""
+          isHighlighted ? "bg-violet-500/15 ring-1 ring-inset ring-violet-500/30" : isActive ? "bg-zinc-800/50" : ""
         } ${hasDetails ? "cursor-pointer hover:bg-zinc-800/30" : ""}`}
       >
         {hasDetails && (
@@ -154,19 +154,16 @@ const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive
             {nodeLogs.length > 0 && (
               <>
                 <div className="mb-1 text-[10px] font-medium uppercase text-zinc-500">Logs</div>
-                {nodeLogs.length > MAX_VISIBLE_LOGS && (
-                  <div className="mb-1 text-[10px] text-zinc-600">
-                    ... {nodeLogs.length - MAX_VISIBLE_LOGS} earlier lines hidden
-                  </div>
+                {nodeLogs.length > 500 ? (
+                  <VirtualLogPane lines={nodeLogs} isRunning={isRunning} activeLogRef={activeLogRef} />
+                ) : (
+                  <pre
+                    ref={isActive ? activeLogRef : undefined}
+                    className={`${isRunning ? "max-h-96" : "max-h-60"} overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400`}
+                  >
+                    {nodeLogs.join("\n")}
+                  </pre>
                 )}
-                <pre
-                  ref={isActive ? activeLogRef : undefined}
-                  className={`${isRunning ? "max-h-96" : "max-h-60"} overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400`}
-                >
-                  {nodeLogs.length > MAX_VISIBLE_LOGS
-                    ? nodeLogs.slice(-MAX_VISIBLE_LOGS).join("\n")
-                    : nodeLogs.join("\n")}
-                </pre>
               </>
             )}
 
@@ -195,12 +192,13 @@ const NodeRow = memo(function NodeRow({ nodeId, name, result, nodeLogs, isActive
   prev.result === next.result &&
   prev.nodeLogs === next.nodeLogs &&
   prev.isActive === next.isActive &&
+  prev.isHighlighted === next.isHighlighted &&
   prev.isExpanded === next.isExpanded
 );
 
 /* ── Main LiveLog component ── */
 
-export default function LiveLog() {
+export default memo(function LiveLog() {
   const runState = useRunStore((s) => s.runState);
   const running = useRunStore((s) => s.running);
   const logs = useRunStore((s) => s.logs);
@@ -218,9 +216,8 @@ export default function LiveLog() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const expandedRunningRef = useRef<Set<string>>(new Set());
-  const [userScrolledAway, setUserScrolledAway] = useState(false);
-  // Guard to suppress scroll-handler feedback during programmatic scrolls
-  const programmaticScrollRef = useRef(false);
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-expand any node that transitions to Running (covers parallel children + sequential)
   useEffect(() => {
@@ -243,45 +240,36 @@ export default function LiveLog() {
     }
   }, [runState]);
 
-  // Track whether user has scrolled away from the bottom of the outer container.
-  // Ignores scroll events caused by programmatic scrollIntoView calls.
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const handleScroll = () => {
-      if (programmaticScrollRef.current) return;
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-      setUserScrolledAway(!atBottom);
-    };
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  // Auto-scroll only when user hasn't manually scrolled away
-  useEffect(() => {
-    if (!userScrolledAway && logEndRef.current) {
-      programmaticScrollRef.current = true;
-      logEndRef.current.scrollIntoView({ behavior: "smooth" });
-      // Clear guard after the smooth scroll animation completes
-      setTimeout(() => { programmaticScrollRef.current = false; }, 400);
-    }
-  }, [logs, userScrolledAway]);
-
-  // Auto-scroll the active node's inner log pane (only when user isn't scrolled away)
-  useEffect(() => {
-    if (!userScrolledAway && activeLogRef.current) {
-      activeLogRef.current.scrollTo({
-        top: activeLogRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    }
-  }, [logs, runState?.current_node, userScrolledAway]);
-
   const scrollToLatest = () => {
-    programmaticScrollRef.current = true;
-    setUserScrolledAway(false);
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    setTimeout(() => { programmaticScrollRef.current = false; }, 400);
+    // Find the last node that has results or logs, expand and highlight it
+    const latestNodeId = [...nodeOrder].reverse().find(
+      (id) => runState?.node_results[id] || (logs[id] && logs[id].length > 0),
+    );
+    if (latestNodeId) {
+      setExpandedNodes((prev) => {
+        const next = new Set(prev);
+        next.add(latestNodeId);
+        return next;
+      });
+      // Highlight with auto-clear after 2s
+      setHighlightedNodeId(latestNodeId);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedNodeId(null);
+        highlightTimerRef.current = null;
+      }, 2000);
+      // Scroll to the node after React re-renders with expanded content
+      requestAnimationFrame(() => {
+        const el = scrollContainerRef.current?.querySelector(`[data-node-id="${latestNodeId}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else {
+          logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+      });
+    } else {
+      logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   };
 
   const toggleExpanded = useCallback((nodeId: string) => {
@@ -296,6 +284,34 @@ export default function LiveLog() {
     });
   }, []);
 
+  // Build node order from pipeline nodes, then append any sub-pipeline child node IDs
+  // NOTE: This must be above the early return so hooks are called in consistent order.
+  const { nodeOrder, nodeNames } = useMemo(() => {
+    if (!runState) return { nodeOrder: [], nodeNames: {} };
+    const pipelineNodeIds = new Set(currentPipeline?.nodes.map((n) => n.id) ?? []);
+    const names: Record<string, string> = {};
+    currentPipeline?.nodes.forEach((n) => {
+      names[n.id] = n.name;
+    });
+
+    // Include sub-pipeline child nodes that aren't in the parent pipeline
+    const extraNodeIds: string[] = [];
+    for (const nodeId of Object.keys(runState.node_results)) {
+      if (!pipelineNodeIds.has(nodeId)) {
+        extraNodeIds.push(nodeId);
+      }
+    }
+    // Also include nodes with logs but no result yet
+    for (const nodeId of Object.keys(logs)) {
+      if (!pipelineNodeIds.has(nodeId) && !extraNodeIds.includes(nodeId)) {
+        extraNodeIds.push(nodeId);
+      }
+    }
+
+    const order = [...(currentPipeline?.nodes.map((n) => n.id) ?? []), ...extraNodeIds];
+    return { nodeOrder: order, nodeNames: names };
+  }, [currentPipeline, runState, logs]);
+
   const handleExport = async () => {
     if (!runState) return;
     const { generateRunReport } = await import("../../lib/exportReport");
@@ -303,38 +319,19 @@ export default function LiveLog() {
     await navigator.clipboard.writeText(report);
   };
 
-  if (!runState) {
+  // Hide run output when viewing a different pipeline than the one that ran
+  const runBelongsToPipeline =
+    runState != null &&
+    currentPipeline != null &&
+    runState.pipeline_name === currentPipeline.name;
+
+  if (!runState || !runBelongsToPipeline) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-sm text-zinc-500">
         No active run. Click Run to start a pipeline.
       </div>
     );
   }
-
-  // Build node order from pipeline nodes, then append any sub-pipeline child node IDs
-  const pipelineNodeIds = new Set(currentPipeline?.nodes.map((n) => n.id) ?? []);
-  const nodeNames: Record<string, string> = {};
-  currentPipeline?.nodes.forEach((n) => {
-    nodeNames[n.id] = n.name;
-  });
-
-  // Include sub-pipeline child nodes that aren't in the parent pipeline
-  const extraNodeIds: string[] = [];
-  if (runState) {
-    for (const nodeId of Object.keys(runState.node_results)) {
-      if (!pipelineNodeIds.has(nodeId)) {
-        extraNodeIds.push(nodeId);
-      }
-    }
-  }
-  // Also include nodes with logs but no result yet
-  for (const nodeId of Object.keys(logs)) {
-    if (!pipelineNodeIds.has(nodeId) && !extraNodeIds.includes(nodeId)) {
-      extraNodeIds.push(nodeId);
-    }
-  }
-
-  const nodeOrder = [...(currentPipeline?.nodes.map((n) => n.id) ?? []), ...extraNodeIds];
 
   const handleResume = async () => {
     if (!currentPipeline || !currentProject || !runState) return;
@@ -465,6 +462,7 @@ export default function LiveLog() {
               result={runState.node_results[nodeId]}
               nodeLogs={logs[nodeId] || []}
               isActive={runState.current_node === nodeId}
+              isHighlighted={highlightedNodeId === nodeId}
               isExpanded={expandedNodes.has(nodeId)}
               onToggle={toggleExpanded}
               activeLogRef={activeLogRef}
@@ -474,16 +472,14 @@ export default function LiveLog() {
         </div>
 
         {/* Floating scroll-to-latest button */}
-        {userScrolledAway && running && (
-          <button
-            onClick={scrollToLatest}
-            className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg transition-opacity hover:bg-blue-500"
-          >
-            <span className="text-[10px]">{"\u25BC"}</span>
-            Latest
-          </button>
-        )}
+        <button
+          onClick={scrollToLatest}
+          className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full bg-zinc-700/80 px-3 py-1.5 text-xs font-medium text-zinc-300 shadow-lg hover:bg-zinc-600"
+        >
+          <span className="text-[10px]">{"\u25BC"}</span>
+          Latest
+        </button>
       </div>
     </div>
   );
-}
+});

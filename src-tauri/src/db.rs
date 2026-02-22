@@ -179,6 +179,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
         .execute(pool)
         .await
         .map_err(|e| format!("Migration failed (idx_runs_started_at): {}", e))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_runs_pipeline_name ON runs(pipeline_name)")
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Migration failed (idx_runs_pipeline_name): {}", e))?;
 
     Ok(())
 }

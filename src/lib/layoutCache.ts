@@ -4,10 +4,14 @@ const MAX_CACHED_LAYOUTS = 20;
 type PositionMap = Record<string, { x: number; y: number }>;
 type LayoutEntry = { positions: PositionMap; accessedAt: number };
 
+// In-memory cache — avoids repeated JSON.parse of localStorage on every read
+let memCache: Record<string, LayoutEntry> | null = null;
+
 function getAll(): Record<string, LayoutEntry> {
+  if (memCache) return memCache;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
+    if (!raw) { memCache = {}; return memCache; }
     const parsed = JSON.parse(raw);
     // Migrate legacy format (plain PositionMap values without accessedAt)
     const entries: Record<string, LayoutEntry> = {};
@@ -18,13 +22,16 @@ function getAll(): Record<string, LayoutEntry> {
         entries[key] = { positions: val as PositionMap, accessedAt: Date.now() };
       }
     }
-    return entries;
+    memCache = entries;
+    return memCache;
   } catch {
-    return {};
+    memCache = {};
+    return memCache;
   }
 }
 
 function saveAll(data: Record<string, LayoutEntry>) {
+  memCache = data;
   // Evict oldest entries if over cap
   const keys = Object.keys(data);
   if (keys.length > MAX_CACHED_LAYOUTS) {

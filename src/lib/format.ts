@@ -1,13 +1,30 @@
+const durationCache = new Map<string, string>();
+const MAX_CACHE_SIZE = 1000;
+
 export function formatDuration(startedAt: string, finishedAt: string): string {
+  const key = startedAt + "|" + finishedAt;
+  const cached = durationCache.get(key);
+  if (cached !== undefined) return cached;
   try {
     const start = new Date(startedAt).getTime();
     const end = new Date(finishedAt).getTime();
     const diffMs = end - start;
-    if (diffMs < 0 || isNaN(diffMs)) return "";
-    return formatMs(diffMs);
+    if (diffMs < 0 || isNaN(diffMs)) {
+      durationCache.set(key, "");
+      return "";
+    }
+    const result = formatMs(diffMs);
+    if (durationCache.size >= MAX_CACHE_SIZE) durationCache.clear();
+    durationCache.set(key, result);
+    return result;
   } catch {
+    durationCache.set(key, "");
     return "";
   }
+}
+
+export function clearDurationCache() {
+  durationCache.clear();
 }
 
 export function formatMs(ms: number): string {

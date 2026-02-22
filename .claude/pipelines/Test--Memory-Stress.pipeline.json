@@ -1,0 +1,140 @@
+{
+  "name": "Test: Memory Stress",
+  "description": "Quick-running pipeline for memory testing. Run this 5-10 times, switch between pipelines, drag nodes, undo/redo, then check JS heap via devtools: performance.memory.usedJSHeapSize / 1024 / 1024",
+  "version": "1.0.0",
+  "variables": {},
+  "nodes": [
+    {
+      "id": "mem-step1",
+      "name": "Generate Data",
+      "type": "shell",
+      "instructions": "echo 'Generating test data...' && for i in $(seq 1 200); do echo \"[batch $i] key=$(head -c 16 /dev/urandom | base64) value=$(head -c 32 /dev/urandom | base64)\"; done && echo 'Done.'",
+      "inputs": [],
+      "outputs": [
+        "raw_data"
+      ],
+      "cache": false,
+      "position": {
+        "x": 40.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "mem-step2",
+      "name": "Process A",
+      "type": "shell",
+      "instructions": "echo 'Processing branch A...' && for i in $(seq 1 100); do echo \"[A-$i] processed\"; done && echo 'Branch A complete.'",
+      "inputs": [],
+      "outputs": [
+        "result_a"
+      ],
+      "cache": false,
+      "position": {
+        "x": 360.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "mem-step3",
+      "name": "Process B",
+      "type": "shell",
+      "instructions": "echo 'Processing branch B...' && for i in $(seq 1 100); do echo \"[B-$i] processed\"; done && echo 'Branch B complete.'",
+      "inputs": [],
+      "outputs": [
+        "result_b"
+      ],
+      "cache": false,
+      "position": {
+        "x": 360.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "mem-step4",
+      "name": "Process C",
+      "type": "shell",
+      "instructions": "echo 'Processing branch C...' && for i in $(seq 1 100); do echo \"[C-$i] processed\"; done && echo 'Branch C complete.'",
+      "inputs": [],
+      "outputs": [
+        "result_c"
+      ],
+      "cache": false,
+      "position": {
+        "x": 360.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "mem-step5",
+      "name": "Merge Results",
+      "type": "shell",
+      "instructions": "echo 'Merging A + B + C...' && sleep 1 && echo 'Merge complete. Total records: 300'",
+      "inputs": [
+        "result_a",
+        "result_b",
+        "result_c"
+      ],
+      "outputs": [
+        "merged"
+      ],
+      "cache": false,
+      "position": {
+        "x": 680.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "mem-step6",
+      "name": "Final Report",
+      "type": "shell",
+      "instructions": "echo '=== Memory Stress Test Report ===' && echo \"Timestamp: $(date)\" && echo \"Hostname: $(hostname)\" && echo 'Status: PASS' && echo '================================'",
+      "inputs": [
+        "merged"
+      ],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 1000.0,
+        "y": 180.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "mem-step1",
+      "to": "mem-step2"
+    },
+    {
+      "id": "e2",
+      "from": "mem-step1",
+      "to": "mem-step3"
+    },
+    {
+      "id": "e3",
+      "from": "mem-step1",
+      "to": "mem-step4"
+    },
+    {
+      "id": "e4",
+      "from": "mem-step2",
+      "to": "mem-step5"
+    },
+    {
+      "id": "e5",
+      "from": "mem-step3",
+      "to": "mem-step5"
+    },
+    {
+      "id": "e6",
+      "from": "mem-step4",
+      "to": "mem-step5"
+    },
+    {
+      "id": "e7",
+      "from": "mem-step5",
+      "to": "mem-step6"
+    }
+  ],
+  "shared_session": true
+}

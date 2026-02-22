@@ -26,6 +26,14 @@ export interface RunState {
   total_cost_usd: number;
 }
 
+export interface RunStateDelta {
+  run_id: string;
+  status?: string;
+  current_node?: string | null;
+  total_cost_usd?: number;
+  node_result?: NodeResult;
+}
+
 export interface NodeLogEvent {
   run_id: string;
   node_id: string;

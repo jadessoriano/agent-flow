@@ -24,7 +24,7 @@ import type { Viewport } from "@xyflow/react";
 import BaseNode from "./nodes/BaseNode";
 import ConditionalEdge from "./edges/ConditionalEdge";
 import NodePalette from "./NodePalette";
-import { computeLayout } from "../../lib/autoLayout";
+import { computeLayoutAsync } from "../../lib/autoLayoutAsync";
 import { getCachedLayout, saveCachedLayout, updateCachedNodePosition } from "../../lib/layoutCache";
 import type { FlowNodeData } from "./nodes/BaseNode";
 import type { NodeType, PipelineNode } from "../../types/pipeline";
@@ -38,6 +38,21 @@ const nodeTypes: NodeTypes = {
 const edgeTypes: EdgeTypes = {
   conditional: ConditionalEdge,
 };
+
+const MINIMAP_NODE_COLORS: Record<string, string> = {
+  "ai-task": "#8b5cf6",
+  "shell": "#10b981",
+  "git": "#f97316",
+  "parallel": "#3b82f6",
+  "approval-gate": "#f59e0b",
+  "sub-pipeline": "#06b6d4",
+  "comment": "#a1a1aa",
+};
+
+function minimapNodeColor(node: Node): string {
+  const nd = node.data as unknown as FlowNodeData;
+  return MINIMAP_NODE_COLORS[nd?.nodeType] ?? "#71717a";
+}
 
 function pipelineNodesToFlow(
   nodes: PipelineNode[],
@@ -98,8 +113,10 @@ export default function Canvas() {
   const removeEdge = usePipelineStore((s) => s.removeEdge);
   const selectNode = usePipelineStore((s) => s.selectNode);
   const selectEdge = usePipelineStore((s) => s.selectEdge);
+  const pushUndoSnapshot = usePipelineStore((s) => s.pushUndoSnapshot);
   const updateAllNodePositions = usePipelineStore((s) => s.updateAllNodePositions);
   const runState = useRunStore((s) => s.runState);
+  const running = useRunStore((s) => s.running);
   const openPanel = useUIStore((s) => s.openPanel);
   const setZoomLevel = useUIStore((s) => s.setZoomLevel);
   const fitViewTrigger = useUIStore((s) => s.fitViewTrigger);
@@ -160,18 +177,25 @@ export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Sync pipeline structure to local state (only when nodes change, NOT on run status)
+  // Sync pipeline structure to local state (only when nodes change, NOT on run status).
+  // Use positions from pipeline nodes directly (correct after undo/redo),
+  // falling back to cached positions only on initial pipeline load.
   useEffect(() => {
     const cached = currentPipelinePath ? getCachedLayout(currentPipelinePath) : null;
     setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cached, undefined) : []);
   }, [currentPipeline?.nodes, currentPipelinePath, setNodes]);
 
   // Update run status/cost/duration in-place (avoids full node rebuild on every run-update)
+  // Only apply results when the run belongs to the currently open pipeline
+  const runBelongsToPipeline =
+    runState != null &&
+    currentPipeline != null &&
+    runState.pipeline_name === currentPipeline.name;
   useEffect(() => {
     setNodes((prev) =>
       prev.map((node) => {
         const d = node.data as unknown as FlowNodeData;
-        const result = runState?.node_results[node.id];
+        const result = runBelongsToPipeline ? runState?.node_results[node.id] : undefined;
         const newStatus = result?.status;
         const newCost = result?.cost_usd ?? undefined;
         const newDur = result?.started_at && result?.finished_at
@@ -186,7 +210,7 @@ export default function Canvas() {
         };
       }),
     );
-  }, [runState, setNodes]);
+  }, [runState, runBelongsToPipeline, setNodes]);
 
   useEffect(() => {
     setEdges(currentPipeline ? pipelineEdgesToFlow(currentPipeline.edges) : []);
@@ -234,16 +258,18 @@ export default function Canvas() {
     const cached = getCachedLayout(currentPipelinePath);
     if (cached) return; // user already has a saved layout
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const positions = computeLayout(currentPipeline.nodes, currentPipeline.edges);
-      updateAllNodePositions(positions);
-      saveCachedLayout(currentPipelinePath, positions);
-      timer = setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2, duration: 300 }), 50);
-    } catch (e) {
-      console.warn("[AutoLayout] Failed to compute layout:", e);
-    }
-    return () => { if (timer) clearTimeout(timer); };
+    let cancelled = false;
+    computeLayoutAsync(currentPipeline.nodes, currentPipeline.edges)
+      .then((positions) => {
+        if (cancelled) return;
+        updateAllNodePositions(positions);
+        saveCachedLayout(currentPipelinePath, positions);
+        setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2, duration: 300 }), 50);
+      })
+      .catch((e) => {
+        if (!cancelled) console.warn("[AutoLayout] Failed to compute layout:", e);
+      });
+    return () => { cancelled = true; };
   }, [currentPipeline, currentPipelinePath, updateAllNodePositions]);
 
   const onConnect = useCallback(
@@ -259,6 +285,10 @@ export default function Canvas() {
     },
     [setEdges, addPipelineEdge],
   );
+
+  const onNodeDragStart = useCallback(() => {
+    pushUndoSnapshot();
+  }, [pushUndoSnapshot]);
 
   const onNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -334,10 +364,11 @@ export default function Canvas() {
     [addNode, currentPipeline],
   );
 
-  const handleAutoLayout = useCallback(() => {
+  const handleAutoLayout = useCallback(async () => {
     if (!currentPipeline || currentPipeline.nodes.length === 0) return;
+    pushUndoSnapshot();
     try {
-      const positions = computeLayout(currentPipeline.nodes, currentPipeline.edges);
+      const positions = await computeLayoutAsync(currentPipeline.nodes, currentPipeline.edges);
       updateAllNodePositions(positions);
       if (currentPipelinePath) {
         saveCachedLayout(currentPipelinePath, positions);
@@ -346,7 +377,7 @@ export default function Canvas() {
     } catch (e) {
       console.warn("[AutoLayout] Failed:", e);
     }
-  }, [currentPipeline, currentPipelinePath, updateAllNodePositions]);
+  }, [currentPipeline, currentPipelinePath, updateAllNodePositions, pushUndoSnapshot]);
 
   if (!currentPipeline) {
     const handleCreateSample = () => {
@@ -416,6 +447,7 @@ export default function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
@@ -428,6 +460,8 @@ export default function Canvas() {
         onMoveEnd={(_event: unknown, viewport: Viewport) => { checkMinimapOverlap(); if (Math.abs(viewport.zoom - useUIStore.getState().zoomLevel) > 0.01) setZoomLevel(viewport.zoom); }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        nodesDraggable={!running}
+        nodesConnectable={!running}
         fitView
         minZoom={0.25}
         maxZoom={2.5}
@@ -447,19 +481,7 @@ export default function Canvas() {
           position="bottom-right"
         />
         <MiniMap
-          nodeColor={(node) => {
-            const nd = node.data as unknown as FlowNodeData;
-            const colors: Record<string, string> = {
-              "ai-task": "#8b5cf6",
-              "shell": "#10b981",
-              "git": "#f97316",
-              "parallel": "#3b82f6",
-              "approval-gate": "#f59e0b",
-              "sub-pipeline": "#06b6d4",
-              "comment": "#a1a1aa",
-            };
-            return colors[nd?.nodeType] ?? "#71717a";
-          }}
+          nodeColor={minimapNodeColor}
           maskColor="rgba(0,0,0,0.7)"
           className={`!rounded-lg !shadow-lg transition-opacity duration-300 hover:!opacity-95 ${
             minimapOverlap

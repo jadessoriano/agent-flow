@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { marked } from "marked";
 import { useAgentStore } from "../../stores/agentStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useUIStore } from "../../stores/uiStore";
 
-export default function AgentEditor() {
+export default memo(function AgentEditor() {
   const selectedAgent = useAgentStore((s) => s.selectedAgent);
   const saving = useAgentStore((s) => s.saving);
   const saveAgent = useAgentStore((s) => s.saveAgent);
@@ -163,4 +163,4 @@ export default function AgentEditor() {
       </div>
     </div>
   );
-}
+});

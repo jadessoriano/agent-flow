@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo, memo } from "react";
 import { useAgentStore } from "../../stores/agentStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useUIStore } from "../../stores/uiStore";
 import { logError, addToast } from "../../lib/errorReporter";
 
-export default function AgentLibrary() {
+export default memo(function AgentLibrary() {
   const agents = useAgentStore((s) => s.agents);
   const loading = useAgentStore((s) => s.loading);
   const selectAgent = useAgentStore((s) => s.selectAgent);
@@ -14,11 +14,11 @@ export default function AgentLibrary() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
 
-  const filtered = agents.filter(
+  const filtered = useMemo(() => agents.filter(
     (a) =>
       (a.display_name ?? a.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (a.description ?? "").toLowerCase().includes(search.toLowerCase()),
-  );
+  ), [agents, search]);
 
   const handleSelect = async (path: string) => {
     await selectAgent(path);
@@ -159,4 +159,4 @@ export default function AgentLibrary() {
       )}
     </div>
   );
-}
+});
