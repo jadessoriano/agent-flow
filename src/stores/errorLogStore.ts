@@ -24,15 +24,21 @@ export const useErrorLogStore = create<ErrorLogState>((set) => ({
   unreadCount: 0,
 
   addError: (level: string, message: string) => {
+    const MAX_SESSION_ERRORS = 500;
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
       message,
     };
-    set((s) => ({
-      sessionErrors: [...s.sessionErrors, entry],
-      unreadCount: s.unreadCount + 1,
-    }));
+    set((s) => {
+      const updated = [...s.sessionErrors, entry];
+      return {
+        sessionErrors: updated.length > MAX_SESSION_ERRORS
+          ? updated.slice(-MAX_SESSION_ERRORS)
+          : updated,
+        unreadCount: s.unreadCount + 1,
+      };
+    });
   },
 
   loadFileErrors: async (limit?: number) => {

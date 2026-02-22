@@ -30,7 +30,17 @@ AgentFlow is a GUI layer on top of what Claude Code already supports — agents 
 - Per-node and per-run token cost estimation (USD)
 - Cost dashboard with aggregate stats: total spend, top pipelines, top nodes
 - Execution duration displayed across all UI surfaces
+- Per-node model selection (Opus, Sonnet, Haiku)
+- Budget limits with automatic halt when exceeded
+- Output caching — skips re-execution when node instructions haven't changed
 - SQLite-persisted run history
+
+### Runtime Performance
+- SQLite WAL mode with indexed queries for non-blocking reads during execution
+- IPC log batching (50ms flush) eliminates per-line event overhead
+- `React.memo` on canvas nodes and log rows prevents cascading re-renders
+- `tokio::sync::watch` channel for zero-cost cancellation instead of mutex polling
+- `JoinSet` processes parallel child results in completion order
 
 ### Agent Library
 - Browse, search, and manage `.claude/agents/*.md` files

@@ -52,7 +52,6 @@ export default function ConditionalEdge({
   targetPosition,
   data,
   selected,
-  markerEnd,
 }: EdgeProps) {
   const edgeData = data as ConditionalEdgeData | undefined;
   const condition = edgeData?.condition;
@@ -75,14 +74,38 @@ export default function ConditionalEdge({
   if (condition === "success") strokeColor = "#22c55e";
   if (condition === "failure") strokeColor = "#ef4444";
 
+  const arrowColor = selected ? "#a78bfa" : strokeColor;
+  const markerId = `af-arrow-${id}`;
+
   return (
     <>
+      <defs>
+        <marker
+          id={markerId}
+          markerWidth="16"
+          markerHeight="16"
+          viewBox="-10 -10 20 20"
+          orient="auto-start-reverse"
+          markerUnits="strokeWidth"
+          refX="0"
+          refY="0"
+        >
+          <polyline
+            stroke={arrowColor}
+            fill={arrowColor}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1"
+            points="-5,-4 0,0 -5,4 -5,-4"
+          />
+        </marker>
+      </defs>
       <BaseEdge
         id={id}
         path={edgePath}
-        markerEnd={markerEnd}
+        markerEnd={`url(#${markerId})`}
         style={{
-          stroke: selected ? "#a78bfa" : strokeColor,
+          stroke: arrowColor,
           strokeWidth: selected ? 2.5 : 2,
         }}
       />

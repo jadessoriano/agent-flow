@@ -16,8 +16,9 @@ export function logWarning(message: string, context?: string) {
 export function addToast(
   message: string,
   level: "error" | "warning" | "info" = "error",
+  onClick?: () => void,
 ) {
-  useUIStore.getState().addToast(message, level);
+  useUIStore.getState().addToast(message, level, onClick);
 }
 
 export function buildGitHubIssueUrl(opts: {

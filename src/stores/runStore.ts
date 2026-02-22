@@ -2,11 +2,14 @@ import { create } from "zustand";
 import type {
   RunState,
   NodeLogEvent,
+  NodeLogBatchEvent,
   ApprovalRequest,
   RunRow,
 } from "../types/run";
 import * as api from "../lib/tauri";
 import type { Pipeline } from "../types/pipeline";
+
+let approvalTimer: ReturnType<typeof setTimeout> | null = null;
 
 interface RunStoreState {
   runState: RunState | null;
@@ -36,6 +39,7 @@ interface RunStoreState {
   ) => Promise<void>;
   handleRunUpdate: (state: RunState) => void;
   handleNodeLog: (event: NodeLogEvent) => void;
+  handleNodeLogBatch: (event: NodeLogBatchEvent) => void;
   handleApprovalRequest: (req: ApprovalRequest) => void;
   clearRun: () => void;
   getNodeLogs: (nodeId: string) => string[];
@@ -71,8 +75,10 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   respondToApproval: async (approved) => {
     await api.respondToApproval(approved);
     set({ approvalRequest: null, approvalResponse: approved ? "approved" : "rejected" });
-    // Auto-clear after 3 seconds
-    setTimeout(() => {
+    // Auto-clear after 3 seconds (cancel any previous timer)
+    if (approvalTimer) clearTimeout(approvalTimer);
+    approvalTimer = setTimeout(() => {
+      approvalTimer = null;
       set((s) => s.approvalResponse ? { approvalResponse: null } : {});
     }, 3000);
   },
@@ -94,7 +100,7 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   },
 
   handleRunUpdate: (state: RunState) => {
-    const isFinished = ["success", "failed", "cancelled"].includes(
+    const isFinished = ["success", "failed", "cancelled", "budget_exceeded"].includes(
       state.status,
     );
     set((s) => ({
@@ -111,12 +117,36 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   },
 
   handleNodeLog: (event: NodeLogEvent) => {
-    set((s) => ({
-      logs: {
-        ...s.logs,
-        [event.node_id]: [...(s.logs[event.node_id] || []), event.line],
-      },
-    }));
+    const MAX_LOG_LINES = 2000;
+    set((s) => {
+      const existing = s.logs[event.node_id] || [];
+      // Mutate existing array in place to avoid per-line allocation
+      existing.push(event.line);
+      const trimmed = existing.length > MAX_LOG_LINES
+        ? existing.slice(-MAX_LOG_LINES)
+        : existing;
+      return {
+        logs: { ...s.logs, [event.node_id]: trimmed },
+      };
+    });
+  },
+
+  handleNodeLogBatch: (event: NodeLogBatchEvent) => {
+    const MAX_LOG_LINES = 2000;
+    if (event.lines.length === 0) return;
+    set((s) => {
+      const existing = s.logs[event.node_id] || [];
+      // Concat batch in one operation instead of per-line state updates
+      const updated = existing.concat(event.lines);
+      return {
+        logs: {
+          ...s.logs,
+          [event.node_id]: updated.length > MAX_LOG_LINES
+            ? updated.slice(-MAX_LOG_LINES)
+            : updated,
+        },
+      };
+    });
   },
 
   handleApprovalRequest: (req: ApprovalRequest) => {

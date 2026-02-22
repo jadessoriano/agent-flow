@@ -53,7 +53,7 @@ export default function NodePalette({ onAutoLayout }: NodePaletteProps) {
   return (
     <>
       {/* Off-screen drag preview elements (styled like actual nodes) */}
-      <div style={{ position: "fixed", left: -10000, top: -10000 }}>
+      <div style={{ position: "fixed", left: -10000, top: -10000, pointerEvents: "none" }}>
         {nodeTypes.map((type) => {
           const meta = NODE_TYPE_META[type];
           const colors = previewColors[type];

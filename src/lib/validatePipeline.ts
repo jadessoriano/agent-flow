@@ -35,6 +35,8 @@ export function validatePipeline(pipeline: Pipeline): ValidationError[] {
   }
 
   // 3. Cycle detection using Kahn's algorithm
+  // Exclude conditional (failure/success) back-edges — these are intentional
+  // retry/recovery loops handled by the executor, not true DAG violations.
   const inDegree = new Map<string, number>();
   const adj = new Map<string, string[]>();
   for (const node of pipeline.nodes) {
@@ -42,6 +44,7 @@ export function validatePipeline(pipeline: Pipeline): ValidationError[] {
     adj.set(node.id, []);
   }
   for (const edge of pipeline.edges) {
+    if (edge.condition) continue; // conditional edges can form retry loops
     adj.get(edge.from)?.push(edge.to);
     inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
   }
@@ -78,15 +81,25 @@ export function validatePipeline(pipeline: Pipeline): ValidationError[] {
   }
 
   // 5. Dead-end warnings (nodes with incoming but no outgoing, that aren't the last in chain)
+  // Helper: check if a node (or its children for parallel groups) has outgoing edges
+  const hasEffectiveOutgoing = (nodeId: string): boolean => {
+    if (pipeline.edges.some((e) => e.from === nodeId)) return true;
+    // For parallel groups, check if any child has outgoing edges
+    const n = pipeline.nodes.find((nd) => nd.id === nodeId);
+    if (n?.type === "parallel" && n.children?.length) {
+      return n.children.some((childId) => pipeline.edges.some((e) => e.from === childId));
+    }
+    return false;
+  };
+
   for (const node of pipeline.nodes) {
     if (node.type === "comment") continue;
     const hasIncoming = pipeline.edges.some((e) => e.to === node.id);
-    const hasOutgoing = pipeline.edges.some((e) => e.from === node.id);
-    if (hasIncoming && !hasOutgoing) {
+    if (hasIncoming && !hasEffectiveOutgoing(node.id)) {
       // This is a terminal node — only warn if there are other terminal nodes
       const terminalCount = pipeline.nodes.filter((n) => {
         if (n.type === "comment") return false;
-        return pipeline.edges.some((e) => e.to === n.id) && !pipeline.edges.some((e) => e.from === n.id);
+        return pipeline.edges.some((e) => e.to === n.id) && !hasEffectiveOutgoing(n.id);
       }).length;
       if (terminalCount > 1) {
         errors.push({

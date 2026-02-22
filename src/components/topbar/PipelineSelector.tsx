@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { logError, addToast } from "../../lib/errorReporter";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import GeneratePrompt from "../modals/GeneratePrompt";
 import TemplatePickerModal from "../modals/TemplatePickerModal";
 
@@ -248,31 +250,31 @@ export default function PipelineSelector() {
           {/* Import / Export */}
           <div className="border-t border-zinc-700 p-2">
             <button
-              onClick={() => {
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = ".json";
-                input.onchange = async (e) => {
-                  const file = (e.target as HTMLInputElement).files?.[0];
-                  if (!file || !currentProject) return;
-                  try {
-                    const text = await file.text();
-                    const pipeline = JSON.parse(text);
-                    if (pipeline.name && pipeline.nodes) {
-                      const { writePipeline } = await import("../../lib/tauri");
-                      await writePipeline(currentProject.path, pipeline);
-                      loadPipelines(currentProject.path);
-                      openPipeline(
-                        `${currentProject.path}/.claude/pipelines/${pipeline.name}.pipeline.json`,
-                      );
-                      setOpen(false);
-                    }
-                  } catch (err) {
-                    logError(`Import failed: ${err}`, "PipelineSelector");
-                    addToast(`Import failed: ${err}`);
+              onClick={async () => {
+                try {
+                  const selected = await openDialog({
+                    filters: [{ name: "Pipeline JSON", extensions: ["json"] }],
+                    multiple: false,
+                  });
+                  if (!selected || !currentProject) return;
+                  const text = await readTextFile(selected as string);
+                  const pipeline = JSON.parse(text);
+                  if (pipeline.name && pipeline.nodes) {
+                    const { writePipeline } = await import("../../lib/tauri");
+                    await writePipeline(currentProject.path, pipeline);
+                    loadPipelines(currentProject.path);
+                    openPipeline(
+                      `${currentProject.path}/.claude/pipelines/${pipeline.name}.pipeline.json`,
+                    );
+                    setOpen(false);
+                    addToast("Pipeline imported successfully", "info");
+                  } else {
+                    addToast("Invalid pipeline file: missing name or nodes");
                   }
-                };
-                input.click();
+                } catch (err) {
+                  logError(`Import failed: ${err}`, "PipelineSelector");
+                  addToast(`Import failed: ${err}`);
+                }
               }}
               className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
             >
@@ -293,16 +295,21 @@ export default function PipelineSelector() {
             </button>
             {currentPipeline && (
               <button
-                onClick={() => {
-                  const json = JSON.stringify(currentPipeline, null, 2);
-                  const blob = new Blob([json], { type: "application/json" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `${currentPipeline.name}.pipeline.json`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  setOpen(false);
+                onClick={async () => {
+                  try {
+                    const dest = await saveDialog({
+                      defaultPath: `${currentPipeline.name}.pipeline.json`,
+                      filters: [{ name: "Pipeline JSON", extensions: ["json"] }],
+                    });
+                    if (!dest) return;
+                    const json = JSON.stringify(currentPipeline, null, 2);
+                    await writeTextFile(dest, json);
+                    setOpen(false);
+                    addToast("Pipeline exported successfully", "info");
+                  } catch (err) {
+                    logError(`Export failed: ${err}`, "PipelineSelector");
+                    addToast(`Export failed: ${err}`);
+                  }
                 }}
                 className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
               >

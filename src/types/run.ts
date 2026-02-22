@@ -32,6 +32,12 @@ export interface NodeLogEvent {
   line: string;
 }
 
+export interface NodeLogBatchEvent {
+  run_id: string;
+  node_id: string;
+  lines: string[];
+}
+
 export interface ApprovalRequest {
   run_id: string;
   node_id: string;

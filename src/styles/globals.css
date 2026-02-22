@@ -4,6 +4,7 @@
   --color-zinc-850: #1e1e22;
 }
 
+/* ── Dark theme (default) ── */
 :root {
   --bg-primary: #09090b;
   --bg-secondary: #18181b;
@@ -14,18 +15,28 @@
   --text-muted: #71717a;
   --border: #3f3f46;
   --border-subtle: #27272a;
+  --scrollbar-thumb: #52525b;
+  --scrollbar-hover: #71717a;
+  color-scheme: dark;
 }
 
+/* ── Light theme — Catppuccin Latte ── */
 [data-theme="light"] {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f4f4f5;
-  --bg-tertiary: #e4e4e7;
+  /* Base / Mantle / Crust */
+  --bg-primary: #eff1f5;
+  --bg-secondary: #e6e9ef;
+  --bg-tertiary: #dce0e8;
   --bg-elevated: #ffffff;
-  --text-primary: #18181b;
-  --text-secondary: #52525b;
-  --text-muted: #71717a;
-  --border: #d4d4d8;
-  --border-subtle: #e4e4e7;
+  /* Text / Subtext */
+  --text-primary: #4c4f69;
+  --text-secondary: #6c6f85;
+  --text-muted: #8c8fa1;
+  /* Surface / Overlay */
+  --border: #bcc0cc;
+  --border-subtle: #ccd0da;
+  --scrollbar-thumb: #9ca0b0;
+  --scrollbar-hover: #7c7f93;
+  color-scheme: light;
 }
 
 html,
@@ -41,9 +52,10 @@ body,
     "Helvetica Neue", Arial, sans-serif;
 }
 
-/* Scrollbar styling */
+/* ── Scrollbar styling ── */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -51,31 +63,338 @@ body,
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #52525b;
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #71717a;
+  background: var(--scrollbar-hover);
 }
 
-/* React Flow overrides */
+/* ── React Flow overrides ── */
 .react-flow__panel {
   margin: 8px !important;
 }
 
-/* Smooth zoom transition */
-.react-flow__viewport {
-  transition: transform 0.12s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-/* Disable transition during active pan/drag for instant response */
-.react-flow.dragging .react-flow__viewport,
-.react-flow__viewport.dragging {
-  transition: none !important;
-}
-
-/* Sharper edges on connection lines */
 .react-flow__edge path {
   shape-rendering: geometricPrecision;
+}
+
+/* ── Running node glow ── */
+@keyframes running-glow {
+  0%, 100% { box-shadow: 0 0 8px 2px rgba(96, 165, 250, 0.3); }
+  50% { box-shadow: 0 0 16px 4px rgba(96, 165, 250, 0.5); }
+}
+.node-running-glow {
+  animation: running-glow 2s ease-in-out infinite;
+}
+
+/* ── Animated edges ── */
+.react-flow__edge.animated path {
+  stroke-dasharray: 5 5;
+  animation: edge-dash 0.5s linear infinite;
+}
+
+@keyframes edge-dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   Light theme (Catppuccin Latte) — Tailwind overrides
+   ═══════════════════════════════════════════════ */
+
+/* ── Form controls ── */
+[data-theme="light"] input,
+[data-theme="light"] textarea,
+[data-theme="light"] select {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: var(--text-muted) !important;
+}
+
+[data-theme="light"] input:focus,
+[data-theme="light"] textarea:focus,
+[data-theme="light"] select:focus {
+  border-color: #8839ef !important; /* Catppuccin Mauve */
+}
+
+[data-theme="light"] option {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+/* ── Labels ── */
+[data-theme="light"] label {
+  color: var(--text-secondary) !important;
+}
+
+/* ── Panels & backgrounds ── */
+[data-theme="light"] .bg-zinc-800,
+[data-theme="light"] .bg-zinc-850 {
+  background-color: var(--bg-elevated) !important;
+}
+
+[data-theme="light"] .bg-zinc-900 {
+  background-color: var(--bg-secondary) !important;
+}
+
+[data-theme="light"] .bg-zinc-950 {
+  background-color: var(--bg-primary) !important;
+}
+
+[data-theme="light"] .bg-zinc-800\/50 {
+  background-color: color-mix(in srgb, var(--bg-elevated) 50%, transparent) !important;
+}
+
+[data-theme="light"] .bg-zinc-800\/80 {
+  background-color: color-mix(in srgb, var(--bg-elevated) 80%, transparent) !important;
+}
+
+[data-theme="light"] .bg-zinc-700 {
+  background-color: var(--border) !important;
+}
+
+/* ── Borders ── */
+[data-theme="light"] .border-zinc-700,
+[data-theme="light"] .border-zinc-600,
+[data-theme="light"] .border-zinc-600\/50 {
+  border-color: var(--border) !important;
+}
+
+[data-theme="light"] .border-zinc-700\/50 {
+  border-color: var(--border-subtle) !important;
+}
+
+/* ── Text colors ── */
+[data-theme="light"] .text-zinc-100 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .text-zinc-200,
+[data-theme="light"] .text-zinc-300 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .text-zinc-400 {
+  color: var(--text-secondary) !important;
+}
+
+[data-theme="light"] .text-zinc-500 {
+  color: var(--text-muted) !important;
+}
+
+[data-theme="light"] .text-zinc-600 {
+  color: #9ca0b0 !important; /* Overlay 0 */
+}
+
+/* ── Placeholder colors ── */
+[data-theme="light"] .placeholder-zinc-500::placeholder,
+[data-theme="light"] .placeholder-zinc-600::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* ── Hover states ── */
+[data-theme="light"] .hover\:bg-zinc-700:hover,
+[data-theme="light"] .hover\:bg-zinc-800:hover {
+  background-color: var(--bg-tertiary) !important;
+}
+
+[data-theme="light"] .hover\:text-zinc-200:hover,
+[data-theme="light"] .hover\:text-zinc-300:hover {
+  color: var(--text-primary) !important;
+}
+
+/* ── Accent buttons — Catppuccin Mauve ── */
+[data-theme="light"] .bg-violet-600 {
+  background-color: #8839ef !important;
+}
+
+[data-theme="light"] .hover\:bg-violet-500:hover {
+  background-color: #7629df !important;
+}
+
+/* ═══════════════════════════════════════
+   Canvas nodes — Catppuccin accent colors
+   ═══════════════════════════════════════ */
+
+/* Node backgrounds: use Catppuccin colors at higher opacity for visibility on Latte base */
+[data-theme="light"] .react-flow__node .bg-violet-500\/15  { background-color: rgb(136 57 239 / 0.14) !important; }  /* Mauve */
+[data-theme="light"] .react-flow__node .bg-emerald-500\/15 { background-color: rgb(64 160 43 / 0.14) !important; }   /* Green */
+[data-theme="light"] .react-flow__node .bg-orange-500\/15  { background-color: rgb(254 100 11 / 0.14) !important; }   /* Peach */
+[data-theme="light"] .react-flow__node .bg-blue-500\/15    { background-color: rgb(30 102 245 / 0.14) !important; }   /* Blue */
+[data-theme="light"] .react-flow__node .bg-amber-500\/15   { background-color: rgb(223 142 29 / 0.14) !important; }   /* Yellow */
+[data-theme="light"] .react-flow__node .bg-cyan-500\/15    { background-color: rgb(23 146 153 / 0.14) !important; }   /* Teal */
+[data-theme="light"] .react-flow__node .bg-yellow-500\/10  { background-color: rgb(223 142 29 / 0.12) !important; }   /* Yellow */
+
+/* Node border accents — use Catppuccin colors */
+[data-theme="light"] .react-flow__node .border-violet-400\/60  { border-color: rgb(136 57 239 / 0.45) !important; }
+[data-theme="light"] .react-flow__node .border-emerald-400\/60 { border-color: rgb(64 160 43 / 0.45) !important; }
+[data-theme="light"] .react-flow__node .border-orange-400\/60  { border-color: rgb(254 100 11 / 0.45) !important; }
+[data-theme="light"] .react-flow__node .border-blue-400\/60    { border-color: rgb(30 102 245 / 0.45) !important; }
+[data-theme="light"] .react-flow__node .border-amber-400\/60   { border-color: rgb(223 142 29 / 0.45) !important; }
+[data-theme="light"] .react-flow__node .border-cyan-400\/60    { border-color: rgb(23 146 153 / 0.45) !important; }
+[data-theme="light"] .react-flow__node .border-yellow-400\/40  { border-color: rgb(223 142 29 / 0.35) !important; }
+
+/* Node icon text — Catppuccin accent colors */
+[data-theme="light"] .react-flow__node .text-violet-400  { color: #8839ef !important; }  /* Mauve */
+[data-theme="light"] .react-flow__node .text-emerald-400 { color: #40a02b !important; }  /* Green */
+[data-theme="light"] .react-flow__node .text-orange-400  { color: #fe640b !important; }  /* Peach */
+[data-theme="light"] .react-flow__node .text-blue-400    { color: #1e66f5 !important; }  /* Blue */
+[data-theme="light"] .react-flow__node .text-amber-400   { color: #df8e1d !important; }  /* Yellow */
+[data-theme="light"] .react-flow__node .text-cyan-400    { color: #179299 !important; }  /* Teal */
+[data-theme="light"] .react-flow__node .text-yellow-400  { color: #df8e1d !important; }  /* Yellow */
+
+/* Node status text */
+[data-theme="light"] .react-flow__node .text-violet-300 { color: #8839ef !important; }
+[data-theme="light"] .react-flow__node .text-cyan-300   { color: #179299 !important; }
+[data-theme="light"] .react-flow__node .text-green-400  { color: #40a02b !important; }
+[data-theme="light"] .react-flow__node .text-red-400    { color: #d20f39 !important; }
+[data-theme="light"] .react-flow__node .text-blue-400   { color: #1e66f5 !important; }
+
+/* Node inner borders */
+[data-theme="light"] .react-flow__node .border-zinc-600\/30 {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Node selection ring */
+[data-theme="light"] .react-flow__node .ring-violet-400\/70 {
+  --tw-ring-color: rgb(136 57 239 / 0.5) !important;
+}
+
+/* Node connection handles — Surface 1 with Overlay border */
+[data-theme="light"] .react-flow__handle {
+  background-color: #bcc0cc !important;
+  border-color: #7c7f93 !important;
+}
+
+/* ── Node Palette (bottom-left) ── */
+[data-theme="light"] .bg-zinc-900\/95 {
+  background-color: color-mix(in srgb, var(--bg-elevated) 95%, transparent) !important;
+  box-shadow: 0 4px 12px rgb(76 79 105 / 0.10) !important;
+}
+
+/* Palette icon colors — Catppuccin accents */
+[data-theme="light"] .text-violet-400  { color: #8839ef !important; }
+[data-theme="light"] .text-emerald-400 { color: #40a02b !important; }
+[data-theme="light"] .text-orange-400  { color: #fe640b !important; }
+[data-theme="light"] .text-blue-400    { color: #1e66f5 !important; }
+[data-theme="light"] .text-amber-400   { color: #df8e1d !important; }
+[data-theme="light"] .text-cyan-400    { color: #179299 !important; }
+[data-theme="light"] .text-yellow-400  { color: #df8e1d !important; }
+
+/* ── React Flow controls ── */
+[data-theme="light"] .react-flow__controls button {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
+
+[data-theme="light"] .react-flow__controls button:hover {
+  background-color: var(--bg-tertiary) !important;
+}
+
+[data-theme="light"] .react-flow__minimap {
+  background-color: var(--bg-secondary) !important;
+}
+
+[data-theme="light"] .react-flow {
+  background-color: var(--bg-primary) !important;
+}
+
+/* React Flow dots — darken for Latte base */
+[data-theme="light"] .react-flow__background pattern circle {
+  fill: #acb0be !important;
+}
+
+/* Edge labels */
+[data-theme="light"] .bg-zinc-700 .text-zinc-400,
+[data-theme="light"] .bg-zinc-800\/80 .text-zinc-500 {
+  color: var(--text-secondary) !important;
+}
+
+/* Status badges in panels */
+[data-theme="light"] .text-green-400  { color: #40a02b !important; }
+[data-theme="light"] .text-red-400    { color: #d20f39 !important; }
+[data-theme="light"] .text-violet-400 { color: #8839ef !important; }
+
+/* Colored bg badges */
+[data-theme="light"] .bg-green-500\/20  { background-color: rgb(64 160 43 / 0.15) !important; }
+[data-theme="light"] .bg-red-500\/20    { background-color: rgb(210 15 57 / 0.15) !important; }
+[data-theme="light"] .bg-violet-500\/20 { background-color: rgb(136 57 239 / 0.15) !important; }
+
+/* ── Markdown preview ── */
+.markdown-preview {
+  line-height: 1.6;
+}
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4 {
+  font-weight: 600;
+  margin: 0.75em 0 0.25em;
+  color: var(--text-primary);
+}
+.markdown-preview h1 { font-size: 1.25em; }
+.markdown-preview h2 { font-size: 1.1em; }
+.markdown-preview h3 { font-size: 1em; }
+.markdown-preview p {
+  margin: 0.4em 0;
+}
+.markdown-preview ul,
+.markdown-preview ol {
+  padding-left: 1.5em;
+  margin: 0.4em 0;
+}
+.markdown-preview li {
+  margin: 0.15em 0;
+}
+.markdown-preview code {
+  background: var(--bg-tertiary);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.markdown-preview pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.6em 0.8em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.markdown-preview pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+.markdown-preview .code-preview {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.markdown-preview blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.75em;
+  color: var(--text-secondary);
+  margin: 0.5em 0;
+}
+.markdown-preview a {
+  color: #8839ef; /* Mauve in both themes looks good */
+  text-decoration: underline;
+}
+[data-theme="light"] .markdown-preview a {
+  color: #1e66f5; /* Catppuccin Blue for links in light mode */
+}
+.markdown-preview strong {
+  color: var(--text-primary);
+}
+.markdown-preview hr {
+  border-color: var(--border);
+  margin: 0.75em 0;
 }

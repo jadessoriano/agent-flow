@@ -103,6 +103,17 @@ pub async fn init_pool(app: &AppHandle) -> Result<SqlitePool, String> {
         .map_err(|e| format!("Failed to connect to DB: {}", e))?;
 
     run_migrations(&pool).await?;
+
+    // Enable WAL mode for concurrent reads during writes
+    sqlx::query("PRAGMA journal_mode=WAL")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
+    sqlx::query("PRAGMA synchronous=NORMAL")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to set synchronous mode: {}", e))?;
+
     Ok(pool)
 }
 
@@ -146,6 +157,28 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
     .execute(pool)
     .await
     .map_err(|e| format!("Migration failed (run_steps): {}", e))?;
+
+    // Performance indexes
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_run_steps_run_id ON run_steps(run_id)")
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Migration failed (idx_run_steps_run_id): {}", e))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_run_steps_cache ON run_steps(instructions_hash, status)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Migration failed (idx_run_steps_cache): {}", e))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_run_steps_cost ON run_steps(cost_usd) WHERE cost_usd IS NOT NULL AND cost_usd > 0",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Migration failed (idx_run_steps_cost): {}", e))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at DESC)")
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Migration failed (idx_runs_started_at): {}", e))?;
 
     Ok(())
 }
@@ -329,6 +362,46 @@ pub async fn update_step_approval(
     Ok(())
 }
 
+/// Insert a complete run step in a single query (replaces the 4-step insert+update pattern).
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_complete_run_step(
+    pool: &SqlitePool,
+    run_id: &str,
+    node_id: &str,
+    node_name: &str,
+    status: &str,
+    attempt: i32,
+    instructions_hash: &str,
+    exit_code: Option<i32>,
+    log_output: Option<&str>,
+    cost_usd: Option<f64>,
+    model: Option<&str>,
+    approval_state: Option<&str>,
+) -> Result<i64, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "INSERT INTO run_steps (run_id, node_id, node_name, started_at, finished_at, status, attempt, instructions_hash, exit_code, log_output, cost_usd, model, approval_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(run_id)
+    .bind(node_id)
+    .bind(node_name)
+    .bind(&now)
+    .bind(&now)
+    .bind(status)
+    .bind(attempt)
+    .bind(instructions_hash)
+    .bind(exit_code)
+    .bind(log_output)
+    .bind(cost_usd)
+    .bind(model)
+    .bind(approval_state)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("insert_complete_run_step failed: {}", e))?;
+    Ok(result.last_insert_rowid())
+}
+
 pub async fn get_run_steps(pool: &SqlitePool, run_id: &str) -> Result<Vec<RunStepRow>, String> {
     let rows = sqlx::query(
         "SELECT id, run_id, node_id, node_name, started_at, finished_at, status, exit_code, log_output, attempt, cost_usd, model, approval_state, instructions_hash
@@ -422,30 +495,24 @@ pub async fn get_cost_summary(pool: &SqlitePool) -> Result<CostSummary, String> 
 }
 
 pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
-    // 1. Total cost
-    let total_row = sqlx::query("SELECT COALESCE(SUM(cost_usd), 0.0) as total FROM run_steps")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("get_usage_stats total cost failed: {}", e))?;
-    let total_cost_usd: f64 = total_row.get("total");
-
-    // 2. Total runs
-    let runs_row = sqlx::query("SELECT COUNT(*) as cnt FROM runs")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("get_usage_stats total runs failed: {}", e))?;
-    let total_runs: u32 = runs_row.get::<i32, _>("cnt") as u32;
-
-    // 3. Total AI steps
-    let ai_row = sqlx::query(
-        "SELECT COUNT(*) as cnt FROM run_steps WHERE cost_usd IS NOT NULL AND cost_usd > 0",
+    // Consolidated scalar query: total cost, total runs, total AI steps, avg duration (4 queries → 1)
+    let stats_row = sqlx::query(
+        "SELECT
+            (SELECT COALESCE(SUM(cost_usd), 0.0) FROM run_steps) as total_cost,
+            (SELECT COUNT(*) FROM runs) as total_runs,
+            (SELECT COUNT(*) FROM run_steps WHERE cost_usd IS NOT NULL AND cost_usd > 0) as total_ai_steps,
+            (SELECT AVG((julianday(finished_at) - julianday(started_at)) * 86400)
+             FROM runs WHERE finished_at IS NOT NULL) as avg_dur",
     )
     .fetch_one(pool)
     .await
-    .map_err(|e| format!("get_usage_stats total ai steps failed: {}", e))?;
-    let total_ai_steps: u32 = ai_row.get::<i32, _>("cnt") as u32;
+    .map_err(|e| format!("get_usage_stats stats failed: {}", e))?;
 
-    // 4. Averages
+    let total_cost_usd: f64 = stats_row.get("total_cost");
+    let total_runs: u32 = stats_row.get::<i32, _>("total_runs") as u32;
+    let total_ai_steps: u32 = stats_row.get::<i32, _>("total_ai_steps") as u32;
+    let avg_duration_secs: Option<f64> = stats_row.get("avg_dur");
+
     let avg_cost_per_run = if total_runs > 0 {
         total_cost_usd / total_runs as f64
     } else {
@@ -456,16 +523,6 @@ pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
     } else {
         0.0
     };
-
-    // 4b. Average duration
-    let dur_row = sqlx::query(
-        "SELECT AVG((julianday(finished_at) - julianday(started_at)) * 86400) as avg_dur
-         FROM runs WHERE finished_at IS NOT NULL",
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| format!("get_usage_stats avg duration failed: {}", e))?;
-    let avg_duration_secs: Option<f64> = dur_row.get("avg_dur");
 
     // 5. Runs list
     let run_rows = sqlx::query(
@@ -572,6 +629,29 @@ pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
         top_nodes,
         top_pipelines,
     })
+}
+
+/// Find a cached successful step matching the given instructions hash.
+/// Returns (log_output, cost_usd) if found.
+pub async fn find_cached_step(
+    pool: &SqlitePool,
+    hash: &str,
+) -> Result<Option<(String, Option<f64>)>, String> {
+    let row = sqlx::query(
+        "SELECT log_output, cost_usd FROM run_steps
+         WHERE instructions_hash = ? AND status = 'Success' AND log_output IS NOT NULL
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(hash)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("find_cached_step failed: {}", e))?;
+
+    Ok(row.map(|r| {
+        let output: String = r.get::<Option<String>, _>("log_output").unwrap_or_default();
+        let cost: Option<f64> = r.get("cost_usd");
+        (output, cost)
+    }))
 }
 
 pub async fn get_avg_ai_step_cost(pool: &SqlitePool) -> Result<Option<f64>, String> {

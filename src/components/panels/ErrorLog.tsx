@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useErrorLogStore } from "../../stores/errorLogStore";
 import { buildGitHubIssueUrl, formatErrorsForExport } from "../../lib/errorReporter";
 
@@ -20,6 +20,7 @@ export default function ErrorLog() {
 
   const [tab, setTab] = useState<"session" | "file">("session");
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     markRead();
@@ -31,20 +32,27 @@ export default function ErrorLog() {
     }
   }, [tab, loadFileErrors]);
 
+  // Clean up copy timer on unmount
+  useEffect(() => {
+    return () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); };
+  }, []);
+
   const entries = tab === "session" ? sessionErrors : fileEntries;
 
   const handleCopy = async () => {
     const text = formatErrorsForExport(entries);
     await navigator.clipboard.writeText(text);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 2000);
   };
 
   const handleCopyFullLog = async () => {
     const log = await getFullLog();
     await navigator.clipboard.writeText(log);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 2000);
   };
 
   const handleGitHubIssue = () => {

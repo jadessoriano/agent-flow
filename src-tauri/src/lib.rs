@@ -47,6 +47,7 @@ pub fn run() {
             executor::get_cost_summary,
             executor::get_usage_stats,
             executor::get_avg_ai_cost,
+            executor::estimate_run,
             // Project management
             project_manager::scan_project,
             project_manager::init_project,

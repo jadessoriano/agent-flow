@@ -83,17 +83,25 @@ export default function TopBar() {
       const blockers = errors.filter((e) => e.severity === "error");
       const warnings = errors.filter((e) => e.severity === "warning");
       if (blockers.length > 0) {
-        addToast(
-          `Pipeline has ${blockers.length} error(s): ${blockers[0].message}`,
-          "error",
-        );
+        for (const err of blockers) {
+          const nodeId = err.nodeId;
+          addToast(
+            err.message,
+            "error",
+            nodeId ? () => useUIStore.getState().focusNode(nodeId) : undefined,
+          );
+        }
         return;
       }
       if (warnings.length > 0) {
-        addToast(
-          `${warnings.length} warning(s): ${warnings[0].message}`,
-          "warning",
-        );
+        for (const warn of warnings) {
+          const nodeId = warn.nodeId;
+          addToast(
+            warn.message,
+            "warning",
+            nodeId ? () => useUIStore.getState().focusNode(nodeId) : undefined,
+          );
+        }
       }
     } catch {
       // Validation import failed — proceed anyway

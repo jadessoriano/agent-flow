@@ -10,6 +10,8 @@ export default function PipelineSettings() {
   const currentProject = useProjectStore((s) => s.currentProject);
 
   const [description, setDescription] = useState("");
+  const [defaultModel, setDefaultModel] = useState("");
+  const [maxCostUsd, setMaxCostUsd] = useState("");
   const [variables, setVariables] = useState<[string, string][]>([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -23,14 +25,19 @@ export default function PipelineSettings() {
   useEffect(() => {
     if (currentPipeline) {
       setDescription(currentPipeline.description);
+      setDefaultModel(currentPipeline.default_model || "");
+      setMaxCostUsd(currentPipeline.max_cost_usd != null ? String(currentPipeline.max_cost_usd) : "");
       setVariables(Object.entries(currentPipeline.variables || {}));
     }
   }, [currentPipeline]);
 
   useEffect(() => {
-    if (currentProject) {
-      listSecrets(currentProject.path).then(setSecrets).catch(() => {});
-    }
+    if (!currentProject) return;
+    let cancelled = false;
+    listSecrets(currentProject.path)
+      .then((s) => { if (!cancelled) setSecrets(s); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [currentProject]);
 
   if (!currentPipeline) {
@@ -73,7 +80,13 @@ export default function PipelineSettings() {
     variables.forEach(([k, v]) => {
       if (k.trim()) vars[k.trim()] = v;
     });
-    updatePipelineMeta({ description, variables: vars });
+    const parsedCost = parseFloat(maxCostUsd);
+    updatePipelineMeta({
+      description,
+      variables: vars,
+      default_model: defaultModel || undefined,
+      max_cost_usd: !isNaN(parsedCost) && parsedCost > 0 ? parsedCost : undefined,
+    });
   };
 
   return (
@@ -101,6 +114,45 @@ export default function PipelineSettings() {
             className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
             placeholder="Describe what this pipeline does..."
           />
+        </div>
+
+        {/* Default Model */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-zinc-400">
+            Default Model
+          </label>
+          <select
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+          >
+            <option value="">(none)</option>
+            <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+            <option value="claude-opus-4-6">Opus 4.6</option>
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          </select>
+          <p className="mt-1 text-[10px] text-zinc-600">
+            Applied to all AI nodes unless overridden per-node.
+          </p>
+        </div>
+
+        {/* Max Cost Budget */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-zinc-400">
+            Max Cost Budget (USD)
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={0.01}
+            value={maxCostUsd}
+            onChange={(e) => setMaxCostUsd(e.target.value)}
+            placeholder="No limit"
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+          />
+          <p className="mt-1 text-[10px] text-zinc-600">
+            Pipeline stops if total cost exceeds this limit. Leave empty for no limit.
+          </p>
         </div>
 
         {/* Variables */}

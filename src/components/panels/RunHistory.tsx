@@ -172,7 +172,6 @@ export default function RunHistory() {
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value as DateFilter)}
             className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 focus:border-violet-500 focus:outline-none"
-            style={{ colorScheme: "dark" }}
           >
             <option value="all">All time</option>
             <option value="today">Today</option>

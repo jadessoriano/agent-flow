@@ -7,6 +7,7 @@ import type {
   NodeType,
 } from "../types/pipeline";
 import * as api from "../lib/tauri";
+import { getCachedLayout } from "../lib/layoutCache";
 
 let nodeIdCounter = 0;
 const MAX_HISTORY = 30;
@@ -115,13 +116,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           // Name changed — use rename to clean up old agent markdown
           const path = await api.renamePipeline(projectPath, currentPipelinePath, currentPipeline.name);
           set({ currentPipelinePath: path, dirty: false, savedPipeline: structuredClone(currentPipeline) });
-          get().loadPipelines(projectPath);
+          // File watcher will refresh the pipeline list
           return;
         }
       }
       const path = await api.writePipeline(projectPath, currentPipeline);
       set({ currentPipelinePath: path, dirty: false, savedPipeline: structuredClone(currentPipeline) });
-      get().loadPipelines(projectPath);
+      // File watcher will refresh the pipeline list
     } catch (e) {
       throw e;
     }
@@ -343,7 +344,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   updateNodePosition: (id: string, position: { x: number; y: number }) => {
     const { currentPipeline } = get();
     if (!currentPipeline) return;
-
+    // Position changes don't push to undo — they are a layout/view concern
+    // persisted via the layout cache, not structural pipeline changes.
     set({
       currentPipeline: {
         ...currentPipeline,
@@ -356,9 +358,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   },
 
   updateAllNodePositions: (positions: Record<string, { x: number; y: number }>) => {
-    const { currentPipeline, undoStack } = get();
+    const { currentPipeline } = get();
     if (!currentPipeline) return;
-    set({ undoStack: [...undoStack, structuredClone(currentPipeline)].slice(-MAX_HISTORY), redoStack: [] });
+    // Position changes don't push to undo — auto-layout and drag are view concerns.
     set({
       currentPipeline: {
         ...currentPipeline,
@@ -423,9 +425,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   },
 
   undo: () => {
-    const { currentPipeline, undoStack, redoStack } = get();
+    const { currentPipeline, currentPipelinePath, undoStack, redoStack } = get();
     if (undoStack.length === 0 || !currentPipeline) return;
-    const prev = undoStack[undoStack.length - 1];
+    const prev = structuredClone(undoStack[undoStack.length - 1]);
+    // Preserve current layout positions — undo only affects structure, not layout
+    if (currentPipelinePath) {
+      const cached = getCachedLayout(currentPipelinePath);
+      if (cached) {
+        prev.nodes = prev.nodes.map((n: PipelineNode) =>
+          cached[n.id] ? { ...n, position: cached[n.id] } : n,
+        );
+      }
+    }
     set({
       currentPipeline: prev,
       undoStack: undoStack.slice(0, -1),
@@ -435,9 +446,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   },
 
   redo: () => {
-    const { currentPipeline, undoStack, redoStack } = get();
+    const { currentPipeline, currentPipelinePath, undoStack, redoStack } = get();
     if (redoStack.length === 0 || !currentPipeline) return;
-    const next = redoStack[redoStack.length - 1];
+    const next = structuredClone(redoStack[redoStack.length - 1]);
+    // Preserve current layout positions — redo only affects structure, not layout
+    if (currentPipelinePath) {
+      const cached = getCachedLayout(currentPipelinePath);
+      if (cached) {
+        next.nodes = next.nodes.map((n: PipelineNode) =>
+          cached[n.id] ? { ...n, position: cached[n.id] } : n,
+        );
+      }
+    }
     set({
       currentPipeline: next,
       redoStack: redoStack.slice(0, -1),

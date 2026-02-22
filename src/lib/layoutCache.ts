@@ -1,17 +1,38 @@
 const STORAGE_KEY = "agentflow-layouts";
+const MAX_CACHED_LAYOUTS = 20;
 
 type PositionMap = Record<string, { x: number; y: number }>;
+type LayoutEntry = { positions: PositionMap; accessedAt: number };
 
-function getAll(): Record<string, PositionMap> {
+function getAll(): Record<string, LayoutEntry> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Migrate legacy format (plain PositionMap values without accessedAt)
+    const entries: Record<string, LayoutEntry> = {};
+    for (const [key, val] of Object.entries(parsed)) {
+      if (val && typeof val === "object" && "accessedAt" in (val as Record<string, unknown>)) {
+        entries[key] = val as LayoutEntry;
+      } else {
+        entries[key] = { positions: val as PositionMap, accessedAt: Date.now() };
+      }
+    }
+    return entries;
   } catch {
     return {};
   }
 }
 
-function saveAll(data: Record<string, PositionMap>) {
+function saveAll(data: Record<string, LayoutEntry>) {
+  // Evict oldest entries if over cap
+  const keys = Object.keys(data);
+  if (keys.length > MAX_CACHED_LAYOUTS) {
+    keys
+      .sort((a, b) => data[a].accessedAt - data[b].accessedAt)
+      .slice(0, keys.length - MAX_CACHED_LAYOUTS)
+      .forEach((k) => delete data[k]);
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
@@ -21,7 +42,12 @@ function saveAll(data: Record<string, PositionMap>) {
  */
 export function getCachedLayout(pipelinePath: string): PositionMap | null {
   const all = getAll();
-  return all[pipelinePath] ?? null;
+  const entry = all[pipelinePath];
+  if (!entry) return null;
+  // Touch accessedAt on read
+  entry.accessedAt = Date.now();
+  saveAll(all);
+  return entry.positions;
 }
 
 /**
@@ -29,7 +55,7 @@ export function getCachedLayout(pipelinePath: string): PositionMap | null {
  */
 export function saveCachedLayout(pipelinePath: string, positions: PositionMap) {
   const all = getAll();
-  all[pipelinePath] = positions;
+  all[pipelinePath] = { positions, accessedAt: Date.now() };
   saveAll(all);
 }
 
@@ -42,8 +68,9 @@ export function updateCachedNodePosition(
   position: { x: number; y: number },
 ) {
   const all = getAll();
-  if (!all[pipelinePath]) all[pipelinePath] = {};
-  all[pipelinePath][nodeId] = position;
+  if (!all[pipelinePath]) all[pipelinePath] = { positions: {}, accessedAt: Date.now() };
+  all[pipelinePath].positions[nodeId] = position;
+  all[pipelinePath].accessedAt = Date.now();
   saveAll(all);
 }
 

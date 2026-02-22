@@ -35,6 +35,8 @@ export interface PipelineNode {
   children?: string[];
   pipeline_ref?: string;
   requires_tools?: string[];
+  model?: string;
+  cache?: boolean;
   position: { x: number; y: number };
 }
 
@@ -56,6 +58,9 @@ export interface Pipeline {
   variables: PipelineVariables;
   nodes: PipelineNode[];
   edges: PipelineEdge[];
+  shared_session?: boolean;
+  default_model?: string;
+  max_cost_usd?: number;
 }
 
 export interface PipelineInfo {

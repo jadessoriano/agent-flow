@@ -5,7 +5,6 @@ import {
   Controls,
   MiniMap,
   BackgroundVariant,
-  MarkerType,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -38,7 +37,6 @@ const nodeTypes: NodeTypes = {
 
 const edgeTypes: EdgeTypes = {
   conditional: ConditionalEdge,
-  flow: ConditionalEdge,
 };
 
 function pipelineNodesToFlow(
@@ -80,16 +78,9 @@ function pipelineEdgesToFlow(
       id: e.id,
       source: e.from,
       target: e.to,
-      type: e.condition ? "conditional" : "flow",
+      type: "conditional",
       data: { condition: e.condition },
-      animated: true,
       style: { stroke: strokeColor, strokeWidth: 2 },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: strokeColor,
-        width: 16,
-        height: 16,
-      },
     };
   });
 }
@@ -112,37 +103,9 @@ export default function Canvas() {
   const openPanel = useUIStore((s) => s.openPanel);
   const setZoomLevel = useUIStore((s) => s.setZoomLevel);
   const fitViewTrigger = useUIStore((s) => s.fitViewTrigger);
+  const focusNodeId = useUIStore((s) => s.focusNodeId);
+  const clearFocusNode = useUIStore((s) => s.clearFocusNode);
 
-  // Build node status and cost maps from run state
-  const nodeStatuses = useMemo(() => {
-    if (!runState) return undefined;
-    const statuses: Record<string, string> = {};
-    for (const [nodeId, result] of Object.entries(runState.node_results)) {
-      statuses[nodeId] = result.status;
-    }
-    return statuses;
-  }, [runState]);
-
-  const nodeCosts = useMemo(() => {
-    if (!runState) return undefined;
-    const costs: Record<string, number | null> = {};
-    for (const [nodeId, result] of Object.entries(runState.node_results)) {
-      costs[nodeId] = result.cost_usd;
-    }
-    return costs;
-  }, [runState]);
-
-  const nodeDurations = useMemo(() => {
-    if (!runState) return undefined;
-    const durations: Record<string, string | undefined> = {};
-    for (const [nodeId, result] of Object.entries(runState.node_results)) {
-      if (result.started_at && result.finished_at) {
-        const dur = formatDuration(result.started_at, result.finished_at);
-        durations[nodeId] = dur || undefined;
-      }
-    }
-    return durations;
-  }, [runState]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const [minimapOverlap, setMinimapOverlap] = useState(false);
@@ -170,7 +133,8 @@ export default function Canvas() {
       );
     });
 
-    setMinimapOverlap(overlaps);
+    // Only update state when value actually changes to avoid unnecessary re-renders
+    setMinimapOverlap((prev) => prev === overlaps ? prev : overlaps);
   }, [currentPipeline]);
 
   // Track which pipeline path we've already auto-laid out
@@ -184,8 +148,8 @@ export default function Canvas() {
   );
 
   const initialNodes = useMemo(
-    () => (currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, nodeStatuses, nodeCosts, cachedPositions, nodeDurations) : []),
-    [currentPipeline?.nodes, nodeStatuses, nodeCosts, cachedPositions, nodeDurations],
+    () => (currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cachedPositions, undefined) : []),
+    [currentPipeline?.nodes, cachedPositions],
   );
 
   const initialEdges = useMemo(
@@ -196,11 +160,33 @@ export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Sync from store to local state
+  // Sync pipeline structure to local state (only when nodes change, NOT on run status)
   useEffect(() => {
     const cached = currentPipelinePath ? getCachedLayout(currentPipelinePath) : null;
-    setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, nodeStatuses, nodeCosts, cached, nodeDurations) : []);
-  }, [currentPipeline?.nodes, nodeStatuses, nodeCosts, currentPipelinePath, setNodes, nodeDurations]);
+    setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cached, undefined) : []);
+  }, [currentPipeline?.nodes, currentPipelinePath, setNodes]);
+
+  // Update run status/cost/duration in-place (avoids full node rebuild on every run-update)
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        const d = node.data as unknown as FlowNodeData;
+        const result = runState?.node_results[node.id];
+        const newStatus = result?.status;
+        const newCost = result?.cost_usd ?? undefined;
+        const newDur = result?.started_at && result?.finished_at
+          ? (formatDuration(result.started_at, result.finished_at) || undefined)
+          : undefined;
+        if (d.runStatus === newStatus && d.costUsd === newCost && d.durationStr === newDur) {
+          return node; // no change — keep same reference
+        }
+        return {
+          ...node,
+          data: { ...d, runStatus: newStatus, costUsd: newCost, durationStr: newDur },
+        };
+      }),
+    );
+  }, [runState, setNodes]);
 
   useEffect(() => {
     setEdges(currentPipeline ? pipelineEdgesToFlow(currentPipeline.edges) : []);
@@ -212,6 +198,27 @@ export default function Canvas() {
       reactFlowInstance.current?.fitView({ padding: 0.2, duration: 300 });
     }
   }, [fitViewTrigger]);
+
+  // Focus on a specific node when requested (e.g., from validation toast click)
+  useEffect(() => {
+    if (!focusNodeId || !currentPipeline) return;
+    const instance = reactFlowInstance.current;
+    if (!instance) return;
+
+    // Select the node and open its config
+    selectNode(focusNodeId);
+    openPanel("nodeConfig");
+
+    // Zoom to the node
+    const node = currentPipeline.nodes.find((n) => n.id === focusNodeId);
+    if (node) {
+      const cachedPos = currentPipelinePath ? getCachedLayout(currentPipelinePath)?.[focusNodeId] : null;
+      const pos = cachedPos ?? node.position;
+      instance.setCenter(pos.x + 100, pos.y + 40, { zoom: 1.2, duration: 400 });
+    }
+
+    clearFocusNode();
+  }, [focusNodeId, currentPipeline, currentPipelinePath, selectNode, openPanel, clearFocusNode]);
 
   // Auto-layout when a pipeline is first opened (no cached layout)
   useEffect(() => {
@@ -227,24 +234,24 @@ export default function Canvas() {
     const cached = getCachedLayout(currentPipelinePath);
     if (cached) return; // user already has a saved layout
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const positions = computeLayout(currentPipeline.nodes, currentPipeline.edges);
       updateAllNodePositions(positions);
       saveCachedLayout(currentPipelinePath, positions);
-      setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2, duration: 300 }), 50);
+      timer = setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2, duration: 300 }), 50);
     } catch (e) {
       console.warn("[AutoLayout] Failed to compute layout:", e);
     }
+    return () => { if (timer) clearTimeout(timer); };
   }, [currentPipeline, currentPipelinePath, updateAllNodePositions]);
 
   const onConnect = useCallback(
     (params: Connection) => {
       setEdges((eds) => addEdge({
         ...params,
-        type: "flow",
-        animated: true,
+        type: "conditional",
         style: { stroke: "#71717a", strokeWidth: 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#71717a", width: 16, height: 16 },
       }, eds));
       if (params.source && params.target) {
         addPipelineEdge(params.source, params.target);
@@ -418,7 +425,7 @@ export default function Canvas() {
         onDragOver={onDragOver}
         onDrop={onDrop}
         onInit={(instance) => { reactFlowInstance.current = instance; checkMinimapOverlap(); }}
-        onMoveEnd={(_event: unknown, viewport: Viewport) => { checkMinimapOverlap(); setZoomLevel(viewport.zoom); }}
+        onMoveEnd={(_event: unknown, viewport: Viewport) => { checkMinimapOverlap(); if (Math.abs(viewport.zoom - useUIStore.getState().zoomLevel) > 0.01) setZoomLevel(viewport.zoom); }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
@@ -429,10 +436,9 @@ export default function Canvas() {
         proOptions={{ hideAttribution: true }}
         className="bg-zinc-950"
         defaultEdgeOptions={{
-          style: { stroke: "#71717a", strokeWidth: 2 },
-          type: "flow",
           animated: true,
-          markerEnd: { type: MarkerType.ArrowClosed, color: "#71717a", width: 16, height: 16 },
+          style: { stroke: "#71717a", strokeWidth: 2 },
+          type: "conditional",
         }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#3f3f46" />

@@ -121,8 +121,8 @@ export async function startRun(
   return invoke("start_run", {
     pipeline,
     inputs,
-    claude_cli_path: claudeCliPath,
-    project_path: projectPath,
+    claudeCliPath,
+    projectPath,
   });
 }
 
@@ -145,7 +145,7 @@ export async function listRunHistory(limit?: number): Promise<RunRow[]> {
 export async function getRunDetails(
   runId: string,
 ): Promise<[RunRow, RunStepRow[]]> {
-  return invoke("get_run_details", { run_id: runId });
+  return invoke("get_run_details", { runId });
 }
 
 export async function resumeRun(
@@ -156,11 +156,11 @@ export async function resumeRun(
   projectPath: string,
 ): Promise<string> {
   return invoke("resume_run", {
-    original_run_id: originalRunId,
+    originalRunId,
     pipeline,
     inputs,
-    claude_cli_path: claudeCliPath,
-    project_path: projectPath,
+    claudeCliPath,
+    projectPath,
   });
 }
 
@@ -174,6 +174,20 @@ export async function getUsageStats(): Promise<UsageStats> {
 
 export async function getAvgAiCost(): Promise<number | null> {
   return invoke("get_avg_ai_cost");
+}
+
+export interface RunEstimate {
+  ai_node_count: number;
+  shell_node_count: number;
+  other_node_count: number;
+  avg_ai_cost: number | null;
+  estimated_low: number | null;
+  estimated_high: number | null;
+  max_cost_usd: number | null;
+}
+
+export async function estimateRun(pipeline: Pipeline): Promise<RunEstimate> {
+  return invoke("estimate_run", { pipeline });
 }
 
 // Settings

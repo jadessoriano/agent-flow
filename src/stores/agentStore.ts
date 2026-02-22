@@ -29,6 +29,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   saving: false,
 
   loadAgents: async (projectPath: string) => {
+    if (get().loading) return; // prevent re-entrant refresh loop
     set({ loading: true });
     try {
       const agents = await api.listAgents(projectPath);

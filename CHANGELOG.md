@@ -5,6 +5,41 @@ All notable changes to AgentFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-22
+
+### Added
+
+- **Per-node model selection** — choose Claude model per node (Opus, Sonnet, Haiku) in the node config panel
+- **Output caching** — skip re-execution of nodes whose instructions haven't changed since last successful run
+- **Budget limits** — set a max cost per pipeline run; execution halts when the budget is exceeded
+- **Cost estimates** — pre-run cost estimation based on historical per-node averages
+- **Node output data passing** — reference upstream node output with `{output.NODE_ID}` substitution in downstream instructions
+- **Conditional edges** — visual edge labels and configuration for success/failure branching
+- **Pipeline settings panel** — configure pipeline-level variables, description, budget, and shared session settings
+- **Input prompt modal** — prompt for pipeline inputs with validation before execution
+
+### Performance
+
+- **Database indexes** — added 4 indexes on `run_steps` and `runs` tables for O(log n) lookups on cached steps, costs, and run history
+- **WAL mode** — enabled SQLite write-ahead logging with `PRAGMA synchronous=NORMAL` for concurrent read/write
+- **Consolidated DB writes** — replaced 4 sequential INSERT/UPDATE calls per node with a single `insert_complete_run_step` call
+- **Consolidated usage stats query** — merged 4 scalar queries into 1 with SQL subselects
+- **Watch channel cancellation** — replaced 250ms mutex polling with `tokio::sync::watch` channel for zero-cost event-driven cancellation
+- **IPC log batching** — buffered stdout/stderr lines and flush every 50ms as `node-log-batch` events instead of per-line IPC
+- **Log array optimization** — `push()` instead of spread for per-node log arrays in Zustand store
+- **Canvas useMemo simplification** — removed 3 intermediate `useMemo` hooks; compute status/cost/duration directly from `runState` in useEffect
+- **NodeRow memoization** — wrapped `NodeRow` with `React.memo` and custom comparator to prevent sibling re-renders
+- **Log truncation** — only render last 200 log lines with "N earlier lines hidden" indicator
+- **Stable callbacks** — `useCallback` for `toggleExpanded` with `nodeId` prop to preserve `React.memo` benefits
+- **BaseNode memoization** — wrapped `BaseNode` with `React.memo` for canvas node render optimization
+- **JoinSet for parallel results** — `tokio::task::JoinSet` processes parallel child results in completion order instead of spawn order
+
+### Changed
+
+- Updated app icons
+- Improved theme and styling (expanded globals.css with custom properties)
+- Enhanced pipeline selector with better UX
+
 ## [0.2.0] - 2026-02-21
 
 ### Added

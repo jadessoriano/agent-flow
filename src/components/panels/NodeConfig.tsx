@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { marked } from "marked";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useAgentStore } from "../../stores/agentStore";
 import type { NodeType, RetryPolicy } from "../../types/pipeline";
@@ -7,6 +8,7 @@ import NodeIcon from "../canvas/nodes/NodeIcons";
 
 const isSubPipeline = (type: string) => type === "sub-pipeline";
 const isComment = (type: string) => type === "comment";
+const isCodeNode = (type: string) => type === "shell" || type === "git";
 
 export default function NodeConfig() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
@@ -29,7 +31,10 @@ export default function NodeConfig() {
   const [retryMax, setRetryMax] = useState(0);
   const [retryDelay, setRetryDelay] = useState(0);
   const [timeout, setTimeout_] = useState(0);
+  const [model, setModel] = useState("");
+  const [cache, setCache] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     if (node) {
@@ -43,9 +48,24 @@ export default function NodeConfig() {
       setRetryMax(node.retry?.max ?? 0);
       setRetryDelay(node.retry?.delay ?? 0);
       setTimeout_(node.timeout ?? 0);
+      setModel(node.model || "");
+      setCache(node.cache || false);
       setConfirmDelete(false);
+      setShowPreview(false);
     }
   }, [node]);
+
+  const previewHtml = useMemo(() => {
+    if (!instructions) return "";
+    if (node && isCodeNode(node.type)) {
+      const escaped = instructions
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      return `<pre class="code-preview"><code>${escaped}</code></pre>`;
+    }
+    return marked.parse(instructions) as string;
+  }, [instructions, node]);
 
   if (!node) {
     return (
@@ -82,6 +102,8 @@ export default function NodeConfig() {
       requires_tools: toolsList.length > 0 ? toolsList : undefined,
       retry,
       timeout: timeout > 0 ? timeout : undefined,
+      model: model || undefined,
+      cache: cache || undefined,
     });
   };
 
@@ -141,7 +163,6 @@ export default function NodeConfig() {
               value={pipeline_ref}
               onChange={(e) => setPipelineRef(e.target.value)}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-              style={{ colorScheme: "dark" }}
             >
               <option value="">
                 Select a pipeline...
@@ -163,22 +184,37 @@ export default function NodeConfig() {
         {/* Instructions (hidden for sub-pipeline and comment nodes) */}
         {!isSubPipeline(node.type) && !isComment(node.type) && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
-              {node.type === "shell" || node.type === "git"
-                ? "Command"
-                : "Instructions"}
-            </label>
-            <textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              rows={5}
-              className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-              placeholder={
-                node.type === "shell"
-                  ? "e.g., npm test"
-                  : "Describe what this step should do..."
-              }
-            />
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium text-zinc-400">
+                {isCodeNode(node.type) ? "Command" : "Instructions"}
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPreview((p) => !p)}
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+              >
+                {showPreview ? "Edit" : "Preview"}
+              </button>
+            </div>
+            {showPreview ? (
+              <div
+                className="markdown-preview w-full overflow-y-auto rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200"
+                style={{ minHeight: "7.5rem" }}
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            ) : (
+              <textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={5}
+                className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+                placeholder={
+                  node.type === "shell"
+                    ? "e.g., npm test"
+                    : "Describe what this step should do..."
+                }
+              />
+            )}
           </div>
         )}
 
@@ -192,7 +228,6 @@ export default function NodeConfig() {
               value={agent}
               onChange={(e) => setAgent(e.target.value)}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-              style={{ colorScheme: "dark" }}
             >
               <option value="">None (use instructions only)</option>
               {agents
@@ -220,6 +255,51 @@ export default function NodeConfig() {
                 ? `Will run: claude --agent ${agent} --print "..."`
                 : "Will run: claude --print \"...\""}
             </p>
+          </div>
+        )}
+
+        {/* Model selector (AI tasks only) */}
+        {!isComment(node.type) && node.type === "ai-task" && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-400">
+              Model
+            </label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+            >
+              <option value="">(default)</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+              <option value="claude-opus-4-6">Opus 4.6</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+            </select>
+            <p className="mt-1 text-[10px] text-zinc-600">
+              {model
+                ? `Will use: --model ${model}`
+                : currentPipeline?.default_model
+                  ? `Uses pipeline default: ${currentPipeline.default_model}`
+                  : "Uses default model"}
+            </p>
+          </div>
+        )}
+
+        {/* Cache output (AI tasks only) */}
+        {!isComment(node.type) && node.type === "ai-task" && (
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="cache-output"
+              checked={cache}
+              onChange={(e) => setCache(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-violet-500 focus:ring-violet-500"
+            />
+            <label htmlFor="cache-output" className="text-xs text-zinc-400">
+              Cache output
+            </label>
+            <span className="text-[10px] text-zinc-600">
+              Reuse result if instructions haven't changed
+            </span>
           </div>
         )}
 

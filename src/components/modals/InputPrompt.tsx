@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { PipelineVariables, Pipeline } from "../../types/pipeline";
-import { getAvgAiCost } from "../../lib/tauri";
+import { estimateRun, type RunEstimate } from "../../lib/tauri";
 
 function formatCost(cost: number): string {
   if (cost === 0) return "$0.00";
@@ -24,52 +24,82 @@ export default function InputPrompt({
   onCancel,
 }: InputPromptProps) {
   const varKeys = Object.keys(variables);
+
+  // Compute root node inputs: inputs on nodes that have no incoming edges
+  // and are not children of a parallel group.
+  // These are the "entry point" values the user needs to provide.
+  const rootInputKeys = (() => {
+    if (!pipeline) return [];
+    const targetNodeIds = new Set(pipeline.edges.map((e) => e.to));
+    // Collect all child IDs of parallel groups — they're implicitly connected
+    const parallelChildIds = new Set<string>();
+    for (const node of pipeline.nodes) {
+      if (node.type === "parallel" && node.children) {
+        for (const cid of node.children) parallelChildIds.add(cid);
+      }
+    }
+    const rootNodes = pipeline.nodes.filter(
+      (n) => !targetNodeIds.has(n.id) && !parallelChildIds.has(n.id),
+    );
+    const keys = new Set<string>();
+    for (const node of rootNodes) {
+      for (const inp of node.inputs) {
+        // Skip inputs that are already pipeline variables
+        if (!(inp in variables)) {
+          keys.add(inp);
+        }
+      }
+    }
+    return [...keys];
+  })();
+
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     varKeys.forEach((k) => {
       init[k] = variables[k] || "";
     });
+    rootInputKeys.forEach((k) => {
+      init[k] = "";
+    });
     return init;
   });
 
-  const [avgAiCost, setAvgAiCost] = useState<number | null>(null);
+  const [estimate, setEstimate] = useState<RunEstimate | null>(null);
   const [costLoading, setCostLoading] = useState(true);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !pipeline) return;
+    let cancelled = false;
     setCostLoading(true);
-    getAvgAiCost()
-      .then((avg) => setAvgAiCost(avg))
-      .catch(() => setAvgAiCost(null))
-      .finally(() => setCostLoading(false));
-  }, [open]);
+    estimateRun(pipeline)
+      .then((est) => { if (!cancelled) setEstimate(est); })
+      .catch(() => { if (!cancelled) setEstimate(null); })
+      .finally(() => { if (!cancelled) setCostLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, pipeline]);
 
-  // Reset values when variables change
+  // Reset values when variables or pipeline change
   useEffect(() => {
     const init: Record<string, string> = {};
     Object.keys(variables).forEach((k) => {
       init[k] = variables[k] || "";
     });
+    rootInputKeys.forEach((k) => {
+      init[k] = "";
+    });
     setValues(init);
-  }, [variables]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variables, pipeline]);
 
   if (!open) return null;
 
-  // Compute node counts from pipeline
-  const aiCount = pipeline
-    ? pipeline.nodes.filter((n) => n.type === "ai-task").length
-    : 0;
-  const shellCount = pipeline
-    ? pipeline.nodes.filter((n) =>
-        ["shell", "git"].includes(n.type),
-      ).length
-    : 0;
+  // Use backend estimate for node counts and cost projections
+  const aiCount = estimate?.ai_node_count ?? 0;
+  const shellCount = estimate?.shell_node_count ?? 0;
   const subPipelineCount = pipeline
     ? pipeline.nodes.filter((n) => n.type === "sub-pipeline").length
     : 0;
-  const otherCount = pipeline
-    ? pipeline.nodes.length - aiCount - shellCount - subPipelineCount
-    : 0;
+  const otherCount = (estimate?.other_node_count ?? 0) - subPipelineCount;
 
   const requiredTools = pipeline
     ? [...new Set(
@@ -79,9 +109,10 @@ export default function InputPrompt({
       )]
     : [];
 
-  const hasEstimate = avgAiCost !== null && aiCount > 0;
-  const estimatedLow = hasEstimate ? avgAiCost! * aiCount * 0.5 : null;
-  const estimatedHigh = hasEstimate ? avgAiCost! * aiCount * 2.0 : null;
+  const avgAiCost = estimate?.avg_ai_cost ?? null;
+  const hasEstimate = estimate?.estimated_low != null;
+  const estimatedLow = estimate?.estimated_low ?? null;
+  const estimatedHigh = estimate?.estimated_high ?? null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,32 +134,67 @@ export default function InputPrompt({
             Run Pipeline
           </h2>
           <p className="mt-1 text-xs text-zinc-500">
-            {varKeys.length > 0
-              ? "Provide values for pipeline variables before starting."
+            {rootInputKeys.length > 0 || varKeys.length > 0
+              ? "Provide inputs and variables before starting."
               : "Ready to run this pipeline."}
           </p>
         </div>
 
         <form onSubmit={handleSubmit}>
-          {varKeys.length > 0 && (
+          {(rootInputKeys.length > 0 || varKeys.length > 0) && (
             <div className="max-h-64 overflow-y-auto px-6 py-4">
               <div className="flex flex-col gap-3">
-                {varKeys.map((key) => (
-                  <div key={key}>
-                    <label className="mb-1 block text-xs font-medium text-zinc-400">
-                      {key}
-                    </label>
-                    <input
-                      type="text"
-                      value={values[key] || ""}
-                      onChange={(e) =>
-                        setValues((v) => ({ ...v, [key]: e.target.value }))
-                      }
-                      placeholder={variables[key] || `Enter ${key}...`}
-                      className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
-                    />
-                  </div>
-                ))}
+                {/* Pipeline inputs (root node entry-point data) */}
+                {rootInputKeys.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                      Pipeline Inputs
+                    </div>
+                    {rootInputKeys.map((key) => (
+                      <div key={key}>
+                        <label className="mb-1 block text-xs font-medium text-violet-400">
+                          {key}
+                        </label>
+                        <input
+                          type="text"
+                          value={values[key] || ""}
+                          onChange={(e) =>
+                            setValues((v) => ({ ...v, [key]: e.target.value }))
+                          }
+                          placeholder={`Enter ${key}...`}
+                          className="w-full rounded border border-violet-500/30 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+                          autoFocus={rootInputKeys.indexOf(key) === 0}
+                        />
+                      </div>
+                    ))}
+                  </>
+                )}
+                {/* Pipeline variables (global substitutions) */}
+                {varKeys.length > 0 && (
+                  <>
+                    {rootInputKeys.length > 0 && (
+                      <div className="mt-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                        Variables
+                      </div>
+                    )}
+                    {varKeys.map((key) => (
+                      <div key={key}>
+                        <label className="mb-1 block text-xs font-medium text-zinc-400">
+                          {key}
+                        </label>
+                        <input
+                          type="text"
+                          value={values[key] || ""}
+                          onChange={(e) =>
+                            setValues((v) => ({ ...v, [key]: e.target.value }))
+                          }
+                          placeholder={variables[key] || `Enter ${key}...`}
+                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+                        />
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -205,6 +271,11 @@ export default function InputPrompt({
                   ) : (
                     <div className="text-xs text-zinc-500">
                       No estimate yet — first AI run
+                    </div>
+                  )}
+                  {estimate?.max_cost_usd != null && (
+                    <div className="text-xs text-amber-400 mt-1">
+                      Budget cap: {formatCost(estimate.max_cost_usd)}
                     </div>
                   )}
                 </div>

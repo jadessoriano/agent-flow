@@ -6,6 +6,7 @@ export interface Toast {
   id: string;
   message: string;
   level: "error" | "warning" | "info";
+  onClick?: () => void;
 }
 
 interface UIState {
@@ -14,14 +15,17 @@ interface UIState {
   zoomLevel: number;
   fitViewTrigger: number;
   toasts: Toast[];
+  focusNodeId: string | null;
 
   openPanel: (view: PanelView) => void;
   closePanel: () => void;
   togglePanel: (view: PanelView) => void;
   setZoomLevel: (level: number) => void;
   triggerFitView: () => void;
-  addToast: (message: string, level?: "error" | "warning" | "info") => void;
+  addToast: (message: string, level?: "error" | "warning" | "info", onClick?: () => void) => void;
   removeToast: (id: string) => void;
+  focusNode: (nodeId: string) => void;
+  clearFocusNode: () => void;
 }
 
 let toastCounter = 0;
@@ -32,6 +36,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   zoomLevel: 1,
   fitViewTrigger: 0,
   toasts: [],
+  focusNodeId: null,
 
   openPanel: (view: PanelView) => {
     set({ panelView: view, panelOpen: true });
@@ -58,12 +63,20 @@ export const useUIStore = create<UIState>((set, get) => ({
     set((s) => ({ fitViewTrigger: s.fitViewTrigger + 1 }));
   },
 
-  addToast: (message: string, level: "error" | "warning" | "info" = "error") => {
+  addToast: (message: string, level: "error" | "warning" | "info" = "error", onClick?: () => void) => {
     const id = `toast-${++toastCounter}`;
-    set((s) => ({ toasts: [...s.toasts, { id, message, level }] }));
+    set((s) => ({ toasts: [...s.toasts, { id, message, level, onClick }] }));
   },
 
   removeToast: (id: string) => {
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
+
+  focusNode: (nodeId: string) => {
+    set({ focusNodeId: nodeId });
+  },
+
+  clearFocusNode: () => {
+    set({ focusNodeId: null });
   },
 }));

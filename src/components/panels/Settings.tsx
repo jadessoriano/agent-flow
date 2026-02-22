@@ -117,7 +117,6 @@ export default function Settings() {
             updateSettings(updated);
           }}
           className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-          style={{ colorScheme: "dark" }}
         >
           <option value="dark">Dark</option>
           <option value="light">Light</option>

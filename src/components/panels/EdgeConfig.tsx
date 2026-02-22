@@ -79,9 +79,9 @@ export default function EdgeConfig() {
             onChange={(e) => setCondition(e.target.value)}
             className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
           >
-            <option value="" className="bg-zinc-800 text-zinc-200">Always (default)</option>
-            <option value="success" className="bg-zinc-800 text-zinc-200">On Success</option>
-            <option value="failure" className="bg-zinc-800 text-zinc-200">On Failure</option>
+            <option value="">Always (default)</option>
+            <option value="success">On Success</option>
+            <option value="failure">On Failure</option>
           </select>
           <p className="mt-1 text-[10px] text-zinc-600">
             {condition === "success"

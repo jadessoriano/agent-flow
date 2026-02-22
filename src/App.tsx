@@ -6,7 +6,7 @@ import { useRunStore } from "./stores/runStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { startWatching, stopWatching } from "./lib/tauri";
 import { listen } from "@tauri-apps/api/event";
-import type { RunState, NodeLogEvent, ApprovalRequest } from "./types/run";
+import type { RunState, NodeLogEvent, NodeLogBatchEvent, ApprovalRequest } from "./types/run";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import WelcomeScreen from "./components/WelcomeScreen";
 import TopBar from "./components/topbar/TopBar";
@@ -27,10 +27,9 @@ export default function App() {
   const projectLoading = useProjectStore((s) => s.loading);
   const loadRecentProjects = useProjectStore((s) => s.loadRecentProjects);
   const detectFromCwd = useProjectStore((s) => s.detectFromCwd);
-  const loadPipelines = usePipelineStore((s) => s.loadPipelines);
-  const loadAgents = useAgentStore((s) => s.loadAgents);
   const handleRunUpdate = useRunStore((s) => s.handleRunUpdate);
   const handleNodeLog = useRunStore((s) => s.handleNodeLog);
+  const handleNodeLogBatch = useRunStore((s) => s.handleNodeLogBatch);
   const handleApprovalRequest = useRunStore((s) => s.handleApprovalRequest);
   const loadHistory = useRunStore((s) => s.loadHistory);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
@@ -85,6 +84,7 @@ export default function App() {
         }
       }),
       listen<NodeLogEvent>("node-log", (e) => handleNodeLog(e.payload)),
+      listen<NodeLogBatchEvent>("node-log-batch", (e) => handleNodeLogBatch(e.payload)),
       listen<ApprovalRequest>("approval-requested", (e) => {
         handleApprovalRequest(e.payload);
         // Desktop notification for approval gates
@@ -101,23 +101,25 @@ export default function App() {
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
     };
-  }, [handleRunUpdate, handleNodeLog, handleApprovalRequest]);
+  }, [handleRunUpdate, handleNodeLog, handleNodeLogBatch, handleApprovalRequest]);
 
-  // Start file watcher and load data when project changes
+  // Start file watcher and load data when project changes.
+  // Use getState() inside the effect so the function refs don't trigger re-runs.
   useEffect(() => {
     if (!currentProject) return;
 
-    loadAgents(currentProject.path);
-    loadPipelines(currentProject.path);
+    const refreshData = () => {
+      useAgentStore.getState().loadAgents(currentProject.path);
+      usePipelineStore.getState().loadPipelines(currentProject.path);
+    };
+
+    refreshData();
     startWatching(currentProject.path).catch(() => {});
 
     // Listen for file changes and refresh (debounced to prevent rapid-fire)
     const unlisten = listen("file-changed", () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        loadAgents(currentProject.path);
-        loadPipelines(currentProject.path);
-      }, 500);
+      debounceRef.current = setTimeout(refreshData, 500);
     });
 
     return () => {
@@ -125,7 +127,7 @@ export default function App() {
       stopWatching().catch(() => {});
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [currentProject, loadAgents, loadPipelines]);
+  }, [currentProject]);
 
   if (projectLoading) {
     return (

@@ -1,24 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "AgentFlow needs broad fs access because users open arbitrary project directories and export pipelines to user-chosen paths via native file dialogs.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
     "fs:default",
-    "fs:allow-read-dir",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-exists",
-    "fs:allow-mkdir",
-    "fs:allow-remove",
-    "fs:allow-rename",
-    "fs:allow-stat",
+    "fs:read-all",
+    "fs:write-all",
     "shell:default",
     "dialog:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "notification:default",
     "notification:allow-notify",
     "notification:allow-is-permission-granted",

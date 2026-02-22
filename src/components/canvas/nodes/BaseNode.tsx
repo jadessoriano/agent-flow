@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { NodeType } from "../../../types/pipeline";
 import { NODE_TYPE_META } from "../../../types/pipeline";
@@ -27,7 +28,7 @@ const colorMap: Record<NodeType, { border: string; bg: string; badge: string; ic
   "comment":        { border: "border-yellow-400/40", bg: "bg-yellow-500/10", badge: "bg-yellow-500", icon: "text-yellow-400", glow: "shadow-yellow-500/10" },
 };
 
-export default function BaseNode({ data, selected }: NodeProps) {
+const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as FlowNodeData;
   const nodeType = nodeData.nodeType;
   const meta = NODE_TYPE_META[nodeType];
@@ -35,7 +36,7 @@ export default function BaseNode({ data, selected }: NodeProps) {
 
   const runStatus = nodeData.runStatus;
   const runStatusRing = runStatus === "Running"
-    ? "ring-2 ring-blue-400/60 shadow-lg shadow-blue-500/20 animate-pulse"
+    ? "ring-2 ring-blue-400/60 node-running-glow"
     : runStatus === "Success"
       ? "ring-2 ring-green-400/50 shadow-lg shadow-green-500/20"
       : runStatus === "Failed"
@@ -144,4 +145,6 @@ export default function BaseNode({ data, selected }: NodeProps) {
       )}
     </div>
   );
-}
+});
+
+export default BaseNode;

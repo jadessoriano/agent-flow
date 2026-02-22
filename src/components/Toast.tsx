@@ -25,6 +25,7 @@ export default function ToastStack() {
           id={toast.id}
           message={toast.message}
           level={toast.level}
+          onClick={toast.onClick}
           onDismiss={removeToast}
         />
       ))}
@@ -36,15 +37,17 @@ function ToastItem({
   id,
   message,
   level,
+  onClick,
   onDismiss,
 }: {
   id: string;
   message: string;
   level: "error" | "warning" | "info";
+  onClick?: () => void;
   onDismiss: (id: string) => void;
 }) {
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(id), 5000);
+    const timer = setTimeout(() => onDismiss(id), 8000);
     return () => clearTimeout(timer);
   }, [id, onDismiss]);
 
@@ -53,7 +56,16 @@ function ToastItem({
       className={`flex items-start gap-2 rounded-lg border px-3 py-2 shadow-lg backdrop-blur-sm ${levelStyles[level]} max-w-sm animate-in slide-in-from-right`}
     >
       <span className="mt-0.5 text-sm">{levelIcons[level]}</span>
-      <p className="flex-1 text-xs leading-relaxed">{message}</p>
+      {onClick ? (
+        <button
+          onClick={() => { onClick(); onDismiss(id); }}
+          className="flex-1 text-left text-xs leading-relaxed underline decoration-dotted underline-offset-2 hover:brightness-125"
+        >
+          {message} <span className="text-[10px] opacity-60">(click to locate)</span>
+        </button>
+      ) : (
+        <p className="flex-1 text-xs leading-relaxed">{message}</p>
+      )}
       <button
         onClick={() => onDismiss(id)}
         className="ml-1 rounded p-0.5 text-zinc-400 hover:text-zinc-200"

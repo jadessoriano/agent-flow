@@ -1,8 +1,9 @@
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub struct WatcherState {
@@ -38,8 +39,27 @@ pub fn start_watching(app: AppHandle, project_path: String) -> Result<(), String
 
     let app_clone = app.clone();
     thread::spawn(move || {
+        let mut last_emit = Instant::now() - Duration::from_secs(10);
+        let debounce = Duration::from_millis(500);
+
         while let Ok(event) = rx.recv() {
             if let Ok(event) = event {
+                // Only react to actual file content changes, not access/metadata
+                let dominated = matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                );
+                if !dominated {
+                    continue;
+                }
+
+                // Debounce: skip if we emitted very recently
+                let now = Instant::now();
+                if now.duration_since(last_emit) < debounce {
+                    continue;
+                }
+                last_emit = now;
+
                 let kind = format!("{:?}", event.kind);
                 let paths: Vec<String> = event
                     .paths

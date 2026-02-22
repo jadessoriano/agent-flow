@@ -42,6 +42,10 @@ pub struct PipelineNode {
     pub pipeline_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires_tools: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub cache: bool,
     pub position: Position,
 }
 
@@ -65,10 +69,20 @@ pub struct Pipeline {
     pub variables: HashMap<String, String>,
     pub nodes: Vec<PipelineNode>,
     pub edges: Vec<PipelineEdge>,
+    #[serde(default = "default_true")]
+    pub shared_session: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_cost_usd: Option<f64>,
 }
 
 fn default_version() -> String {
     "1.0.0".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -296,6 +310,8 @@ The JSON must match this exact schema:
   "description": "string — one-line description",
   "version": "1.0.0",
   "variables": { "key": "default_value" },
+  "default_model": null,
+  "max_cost_usd": null,
   "nodes": [
     {
       "id": "node-1",
@@ -310,6 +326,8 @@ The JSON must match this exact schema:
       "children": null,
       "pipeline_ref": null,
       "requires_tools": [],
+      "model": null,
+      "cache": false,
       "position": { "x": 300, "y": 100 }
     }
   ],
@@ -330,6 +348,10 @@ Field details:
 - "pipeline_ref": null OR "pipeline-name" — only used for "sub-pipeline" type nodes.
 - "agent": null OR "agent-name" — only used for "ai-task" nodes, specifies a custom Claude agent.
 - "requires_tools": [] — MCP tools required by ai-task nodes.
+- "model": null OR "claude-sonnet-4-6" | "claude-opus-4-6" | "claude-haiku-4-5-20251001" — per-node model override for ai-task nodes.
+- "cache": false — when true, reuse cached output if instructions haven't changed (ai-task only).
+- "default_model": null OR model string — pipeline-level default model for all AI nodes.
+- "max_cost_usd": null OR number — budget limit; pipeline stops if total cost exceeds this.
 
 Node types:
 - "shell": Run a shell command. Put the command in "instructions".
@@ -365,16 +387,20 @@ pub async fn generate_pipeline(
 
     let full_prompt = format!("{}{}\"\n\nRespond with ONLY the JSON object.", PIPELINE_SCHEMA_PROMPT, prompt);
 
-    let output = Command::new(&cli_path)
-        .arg("--print")
-        .arg(&full_prompt)
-        .current_dir(&project_path)
-        .output()
-        .await
-        .map_err(|e| {
-            log::error!("Failed to spawn Claude CLI at '{}': {}", cli_path, e);
-            format!("Failed to spawn Claude CLI at '{}': {}", cli_path, e)
-        })?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        Command::new(&cli_path)
+            .arg("--print")
+            .arg(&full_prompt)
+            .current_dir(&project_path)
+            .output(),
+    )
+    .await
+    .map_err(|_| "Pipeline generation timed out after 120 seconds".to_string())?
+    .map_err(|e| {
+        log::error!("Failed to spawn Claude CLI at '{}': {}", cli_path, e);
+        format!("Failed to spawn Claude CLI at '{}': {}", cli_path, e)
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
