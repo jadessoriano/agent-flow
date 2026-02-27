@@ -70,6 +70,7 @@ fn is_executable(path: &Path) -> bool {
     {
         return true; // On non-unix, existence is good enough
     }
+    #[cfg(unix)]
     false
 }
 

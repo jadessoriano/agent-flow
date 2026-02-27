@@ -69,11 +69,17 @@ pub struct ExecutorState {
     pub active_run: ActiveRunHandle,
 }
 
-impl ExecutorState {
-    pub fn new() -> Self {
+impl Default for ExecutorState {
+    fn default() -> Self {
         Self {
             active_run: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl ExecutorState {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -304,7 +310,7 @@ fn resolve_separator(sep: &str) -> &str {
         "comma" => ",",
         "space" => " ",
         "tab" => "\t",
-        other if other.is_empty() => "\n", // empty → default to newline
+        "" => "\n", // empty → default to newline
         other => other,                    // custom or literal separator
     }
 }
@@ -714,10 +720,10 @@ async fn execute_shell_or_claude(
                         buf.iter().rev().take(10).collect::<Vec<_>>()
                     );
                     let parsed = parse_cost_from_stderr(&buf);
-                    if parsed.is_none() {
-                        log::debug!("Node {}: no cost extracted", node_id);
+                    if let Some(cost) = parsed {
+                        log::info!("Node {}: stderr cost ${:.4}", node_id, cost);
                     } else {
-                        log::info!("Node {}: stderr cost ${:.4}", node_id, parsed.unwrap());
+                        log::debug!("Node {}: no cost extracted", node_id);
                     }
                     parsed
                 }
@@ -2477,7 +2483,7 @@ async fn run_pipeline_loop(
     // Each re-queued node runs from its position in the execution order forward,
     // which may trigger further re-queues (up to the per-node limit).
     while !requeue.is_empty() {
-        let batch: Vec<String> = requeue.drain(..).collect();
+        let batch: Vec<String> = std::mem::take(&mut requeue);
 
         // Check cancellation before processing re-queue batch
         {

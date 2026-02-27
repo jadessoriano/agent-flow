@@ -6,8 +6,13 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-static USAGE_STATS_CACHE: std::sync::LazyLock<Mutex<Option<(Instant, UsageStats)>>> =
-    std::sync::LazyLock::new(|| Mutex::new(None));
+use std::sync::OnceLock;
+
+static USAGE_STATS_CACHE: OnceLock<Mutex<Option<(Instant, UsageStats)>>> = OnceLock::new();
+
+fn usage_cache() -> &'static Mutex<Option<(Instant, UsageStats)>> {
+    USAGE_STATS_CACHE.get_or_init(|| Mutex::new(None))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRow {
@@ -520,14 +525,14 @@ pub async fn get_cost_summary(pool: &SqlitePool) -> Result<CostSummary, String> 
 }
 
 pub fn invalidate_usage_stats_cache() {
-    if let Ok(mut guard) = USAGE_STATS_CACHE.lock() {
+    if let Ok(mut guard) = usage_cache().lock() {
         *guard = None;
     }
 }
 
 pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
     // Check cache first (30-second TTL)
-    if let Ok(guard) = USAGE_STATS_CACHE.lock() {
+    if let Ok(guard) = usage_cache().lock() {
         if let Some((cached_at, ref stats)) = *guard {
             if cached_at.elapsed() < Duration::from_secs(30) {
                 return Ok(stats.clone());
@@ -671,7 +676,7 @@ pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
     };
 
     // Cache the result
-    if let Ok(mut guard) = USAGE_STATS_CACHE.lock() {
+    if let Ok(mut guard) = usage_cache().lock() {
         *guard = Some((Instant::now(), stats.clone()));
     }
 
