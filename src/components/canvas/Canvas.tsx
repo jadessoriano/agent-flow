@@ -3,6 +3,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  ControlButton,
   MiniMap,
   BackgroundVariant,
   useNodesState,
@@ -109,6 +110,7 @@ function pipelineNodesToFlow(
   nodeDurations?: Record<string, string | undefined>,
   childParentMap?: Map<string, { name: string; type: NodeType; side: "left" | "right" }>,
   connectionSets?: { incoming: Set<string>; outgoing: Set<string> },
+  compact?: boolean,
 ): Node[] {
   return nodes.map((n) => {
     const parent = childParentMap?.get(n.id);
@@ -133,6 +135,7 @@ function pipelineNodesToFlow(
         groupParentSide: parent?.side,
         hasIncoming: connectionSets?.incoming.has(n.id),
         hasOutgoing: connectionSets?.outgoing.has(n.id),
+        compact: compact || false,
       } satisfies FlowNodeData,
     };
   });
@@ -322,7 +325,7 @@ function pipelineEdgesToFlow(
       ? "#22c55e"
       : e.condition === "failure"
         ? "#ef4444"
-        : "#71717a";
+        : "#a1a1aa";
     return {
       id: e.id,
       source: e.from,
@@ -377,7 +380,6 @@ function pipelineEdgesToFlow(
 }
 
 export default function Canvas() {
-  const pipelines = usePipelineStore((s) => s.pipelines);
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
   const currentPipelinePath = usePipelineStore((s) => s.currentPipelinePath);
   const createFromTemplate = usePipelineStore((s) => s.createFromTemplate);
@@ -398,11 +400,24 @@ export default function Canvas() {
   const fitViewTrigger = useUIStore((s) => s.fitViewTrigger);
   const focusNodeId = useUIStore((s) => s.focusNodeId);
   const clearFocusNode = useUIStore((s) => s.clearFocusNode);
+  const compactCanvas = useUIStore((s) => s.compactCanvas);
+  const toggleCompactCanvas = useUIStore((s) => s.toggleCompactCanvas);
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const [minimapOverlap, setMinimapOverlap] = useState(false);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const hoveredNodeIdRef = useRef<string | null>(null);
+  const [hoveredNodeId, _setHoveredNodeId] = useState<string | null>(null);
+  const isPanningRef = useRef(false);
+  /** Track whether dim/highlight classes are currently applied to avoid no-op setNodes/setEdges */
+  const highlightAppliedRef = useRef(false);
+
+  // Guarded setter: skip if value unchanged or panning
+  const setHoveredNodeId = useCallback((id: string | null) => {
+    if (id === hoveredNodeIdRef.current) return;
+    hoveredNodeIdRef.current = id;
+    _setHoveredNodeId(id);
+  }, []);
 
   // Check overlap only when movement stops — CSS transition handles the visual smoothing
   const checkMinimapOverlap = useCallback(() => {
@@ -449,9 +464,25 @@ export default function Canvas() {
     [currentPipeline?.nodes, currentPipeline?.edges],
   );
 
+  // Cached parent↔child maps for hover highlight (only depends on pipeline nodes, not hoveredNodeId)
+  const { hoverParentToChildren, hoverChildToParent } = useMemo(() => {
+    if (!currentPipeline) return { hoverParentToChildren: new Map<string, string[]>(), hoverChildToParent: new Map<string, string>() };
+    const hoverParentToChildren = new Map<string, string[]>();
+    const hoverChildToParent = new Map<string, string>();
+    for (const node of currentPipeline.nodes) {
+      if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
+        hoverParentToChildren.set(node.id, node.children);
+        for (const cid of node.children) {
+          hoverChildToParent.set(cid, node.id);
+        }
+      }
+    }
+    return { hoverParentToChildren, hoverChildToParent };
+  }, [currentPipeline?.nodes]);
+
   const initialNodes = useMemo(
-    () => (currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cachedPositions, undefined, childParentMap, connectionSets) : []),
-    [currentPipeline?.nodes, cachedPositions, childParentMap, connectionSets],
+    () => (currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cachedPositions, undefined, childParentMap, connectionSets, compactCanvas) : []),
+    [currentPipeline?.nodes, cachedPositions, childParentMap, connectionSets, compactCanvas],
   );
 
   const graphMidY = useMemo(
@@ -472,8 +503,8 @@ export default function Canvas() {
   // falling back to cached positions only on initial pipeline load.
   useEffect(() => {
     const cached = currentPipelinePath ? getCachedLayout(currentPipelinePath) : null;
-    setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cached, undefined, childParentMap, connectionSets) : []);
-  }, [currentPipeline?.nodes, currentPipelinePath, setNodes, childParentMap, connectionSets]);
+    setNodes(currentPipeline ? pipelineNodesToFlow(currentPipeline.nodes, undefined, undefined, cached, undefined, childParentMap, connectionSets, compactCanvas) : []);
+  }, [currentPipeline?.nodes, currentPipelinePath, setNodes, childParentMap, connectionSets, compactCanvas]);
 
   // Update run status/cost/duration in-place (avoids full node rebuild on every run-update)
   // Only apply results when the run belongs to the currently open pipeline
@@ -515,29 +546,17 @@ export default function Canvas() {
 
     highlightedNodes.add(hoveredNodeId);
 
-    // Build parent→children map and child→parent map
-    const parentToChildren = new Map<string, string[]>();
-    const childToParent = new Map<string, string>();
-    for (const node of currentPipeline.nodes) {
-      if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
-        parentToChildren.set(node.id, node.children);
-        for (const cid of node.children) {
-          childToParent.set(cid, node.id);
-        }
-      }
-    }
-
     // If hovered node is a parent → highlight all its children
-    const children = parentToChildren.get(hoveredNodeId);
+    const children = hoverParentToChildren.get(hoveredNodeId);
     if (children) {
       for (const cid of children) highlightedNodes.add(cid);
     }
 
     // If hovered node is a child → highlight its parent and all siblings
-    const parentId = childToParent.get(hoveredNodeId);
+    const parentId = hoverChildToParent.get(hoveredNodeId);
     if (parentId) {
       highlightedNodes.add(parentId);
-      const siblings = parentToChildren.get(parentId);
+      const siblings = hoverParentToChildren.get(parentId);
       if (siblings) {
         for (const sib of siblings) highlightedNodes.add(sib);
       }
@@ -555,25 +574,26 @@ export default function Canvas() {
     }
 
     // Highlight synthetic edges between highlighted nodes
-    for (const node of currentPipeline.nodes) {
-      if ((node.type === "loop" || node.type === "parallel") && node.children?.length) {
-        if (highlightedNodes.has(node.id)) {
-          for (const cid of node.children) {
-            if (highlightedNodes.has(cid)) {
-              highlightedEdges.add(`_synth_${node.id}_${cid}`);
-            }
+    for (const [parentId, childIds] of hoverParentToChildren) {
+      if (highlightedNodes.has(parentId)) {
+        for (const cid of childIds) {
+          if (highlightedNodes.has(cid)) {
+            highlightedEdges.add(`_synth_${parentId}_${cid}`);
           }
         }
       }
     }
 
     return { nodes: highlightedNodes, edges: highlightedEdges };
-  }, [hoveredNodeId, currentPipeline]);
+  }, [hoveredNodeId, currentPipeline, hoverParentToChildren, hoverChildToParent]);
 
   // Apply dim/highlight classes to React Flow nodes and edges
   useEffect(() => {
     if (!highlightSets) {
-      // No hover — remove all dim classes and dimmed data
+      // No hover — only clean up if we previously applied highlights
+      if (!highlightAppliedRef.current) return;
+      highlightAppliedRef.current = false;
+
       setNodes((nds) => nds.map((n) => {
         if (!n.className) return n;
         return { ...n, className: undefined };
@@ -586,15 +606,20 @@ export default function Canvas() {
       return;
     }
 
-    setNodes((nds) => nds.map((n) => ({
-      ...n,
-      className: highlightSets.nodes.has(n.id) ? "af-highlighted" : "af-dimmed",
-    })));
+    highlightAppliedRef.current = true;
+    setNodes((nds) => nds.map((n) => {
+      const cls = highlightSets.nodes.has(n.id) ? "af-highlighted" : "af-dimmed";
+      if (n.className === cls) return n;
+      return { ...n, className: cls };
+    }));
     setEdges((eds) => eds.map((e) => {
       const isHighlighted = highlightSets.edges.has(e.id);
+      const isSynth = e.id.startsWith("_synth_");
+      const cls = isHighlighted ? "af-highlighted" : isSynth ? "af-dimmed-hidden" : "af-dimmed";
+      if (e.className === cls) return e;
       return {
         ...e,
-        className: isHighlighted ? "af-highlighted" : "af-dimmed",
+        className: cls,
         data: { ...(e.data as Record<string, unknown>), dimmed: !isHighlighted },
       };
     }));
@@ -661,7 +686,7 @@ export default function Canvas() {
       setEdges((eds) => addEdge({
         ...params,
         type: "conditional",
-        style: { stroke: "#71717a", strokeWidth: 2 },
+        style: { stroke: "#a1a1aa", strokeWidth: 2 },
       }, eds));
       if (params.source && params.target) {
         addPipelineEdge(params.source, params.target);
@@ -726,12 +751,12 @@ export default function Canvas() {
   );
 
   const onNodeMouseEnter = useCallback((_event: React.MouseEvent, node: Node) => {
-    setHoveredNodeId(node.id);
-  }, []);
+    if (!isPanningRef.current) setHoveredNodeId(node.id);
+  }, [setHoveredNodeId]);
 
   const onNodeMouseLeave = useCallback(() => {
-    setHoveredNodeId(null);
-  }, []);
+    if (!isPanningRef.current) setHoveredNodeId(null);
+  }, [setHoveredNodeId]);
 
   // Drop handler for node palette
   const onDragOver = useCallback((event: DragEvent) => {
@@ -805,7 +830,7 @@ export default function Canvas() {
             <svg className="mx-auto mb-3 h-12 w-12 text-zinc-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
             </svg>
-            {pipelines.length === 0 ? (
+            {usePipelineStore.getState().pipelines.length === 0 ? (
               <>
                 <p className="text-sm text-zinc-500">No pipelines yet</p>
                 <p className="mt-1 text-xs text-zinc-600">Get started by creating your first pipeline</p>
@@ -853,7 +878,8 @@ export default function Canvas() {
         onDragOver={onDragOver}
         onDrop={onDrop}
         onInit={(instance) => { reactFlowInstance.current = instance; checkMinimapOverlap(); }}
-        onMoveEnd={(_event: unknown, viewport: Viewport) => { checkMinimapOverlap(); if (Math.abs(viewport.zoom - useUIStore.getState().zoomLevel) > 0.01) setZoomLevel(viewport.zoom); }}
+        onMoveStart={() => { isPanningRef.current = true; setHoveredNodeId(null); }}
+        onMoveEnd={(_event: unknown, viewport: Viewport) => { isPanningRef.current = false; checkMinimapOverlap(); if (Math.abs(viewport.zoom - useUIStore.getState().zoomLevel) > 0.01) setZoomLevel(viewport.zoom); }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodesDraggable={!running}
@@ -867,7 +893,7 @@ export default function Canvas() {
         className="bg-zinc-950"
         defaultEdgeOptions={{
           animated: true,
-          style: { stroke: "#71717a", strokeWidth: 2 },
+          style: { stroke: "#a1a1aa", strokeWidth: 2 },
           type: "conditional",
         }}
       >
@@ -875,7 +901,25 @@ export default function Canvas() {
         <Controls
           className="!bg-zinc-800 !border-zinc-600/50 !rounded-lg !shadow-lg [&>button]:!bg-zinc-800 [&>button]:!border-zinc-600/50 [&>button]:!text-zinc-300 [&>button:hover]:!bg-zinc-700"
           position="bottom-right"
-        />
+        >
+          <ControlButton onClick={toggleCompactCanvas} title={compactCanvas ? "Expand nodes" : "Compact nodes"}>
+            {compactCanvas ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <line x1="14" y1="10" x2="21" y2="3" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            )}
+          </ControlButton>
+        </Controls>
         <MiniMap
           nodeColor={minimapNodeColor}
           maskColor="rgba(0,0,0,0.7)"

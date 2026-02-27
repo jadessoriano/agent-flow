@@ -1,16 +1,25 @@
-import { useState, useEffect, useMemo, memo } from "react";
-import { marked } from "marked";
+import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { usePipelineStore } from "../../stores/pipelineStore";
 import { useAgentStore } from "../../stores/agentStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import type { NodeType, RetryPolicy } from "../../types/pipeline";
 import { NODE_TYPE_META } from "../../types/pipeline";
 import NodeIcon from "../canvas/nodes/NodeIcons";
+import { HelpIcon } from "../HintOverlay";
 
 const isSubPipeline = (type: string) => type === "sub-pipeline";
 const isComment = (type: string) => type === "comment";
 const isCodeNode = (type: string) => type === "shell" || type === "git";
 const isLoop = (type: string) => type === "loop";
 const isParallelOrLoop = (type: string) => type === "parallel" || type === "loop";
+
+const TIMEOUT_OPTIONS = [
+  { label: "None", value: 0 },
+  { label: "1 min", value: 60 },
+  { label: "5 min", value: 300 },
+  { label: "15 min", value: 900 },
+  { label: "30 min", value: 1800 },
+];
 
 export default memo(function NodeConfig() {
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
@@ -20,8 +29,14 @@ export default memo(function NodeConfig() {
   const selectNode = usePipelineStore((s) => s.selectNode);
   const agents = useAgentStore((s) => s.agents);
   const pipelines = usePipelineStore((s) => s.pipelines);
+  const mode = useSettingsStore((s) => s.local.mode);
+  const isSimple = mode === "simple";
 
-  const node = currentPipeline?.nodes.find((n) => n.id === selectedNodeId);
+  const node = useMemo(
+    () => currentPipeline?.nodes.find((n) => n.id === selectedNodeId),
+    [currentPipeline?.nodes, selectedNodeId],
+  );
+  const nodeId = node?.id;
 
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -42,6 +57,51 @@ export default memo(function NodeConfig() {
   const [loopTimeout, setLoopTimeout] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [simpleRetry, setSimpleRetry] = useState(false);
+
+  // Lazy-load marked for markdown preview (avoids bundling it eagerly)
+  const markedRef = useRef<typeof import("marked")["marked"] | null>(null);
+  const [markedReady, setMarkedReady] = useState(false);
+  useEffect(() => {
+    if (markedRef.current) return;
+    import("marked").then((m) => {
+      markedRef.current = m.marked;
+      setMarkedReady(true);
+    });
+  }, []);
+
+  // Compute upstream nodes for "Use output from" dropdown
+  const edges = currentPipeline?.edges;
+  const nodes = currentPipeline?.nodes;
+  const upstreamNodes = useMemo(() => {
+    if (!edges || !nodes || !nodeId) return [];
+    const incomingEdges = edges.filter((e) => e.to === nodeId);
+    const upstreamIds = new Set(incomingEdges.map((e) => e.from));
+    return nodes.filter((n) => upstreamIds.has(n.id));
+  }, [edges, nodes, nodeId]);
+
+  // Eligible nodes for parallel/loop children checkboxes
+  const nodeType = node?.type;
+  const eligibleChildNodes = useMemo(() => {
+    if (!nodes || !nodeId || !nodeType || !isParallelOrLoop(nodeType)) return [];
+    return nodes.filter(
+      (n) => n.id !== nodeId && n.type !== "parallel" && n.type !== "loop",
+    );
+  }, [nodes, nodeId, nodeType]);
+
+  // Filtered agents (exclude self-referencing pipeline agents)
+  const pipelineName = currentPipeline?.name;
+  const filteredAgents = useMemo(() => {
+    const safeName = pipelineName?.replace(/[^a-zA-Z0-9\-_]/g, "-").toLowerCase();
+    return agents.filter((a) => {
+      if (!safeName) return true;
+      const aNameLower = a.name.toLowerCase();
+      if (aNameLower === `_pipeline--${safeName}`) return false;
+      if (aNameLower === safeName) return false;
+      if (a.origin === "pipeline" && (a.display_name ?? "").toLowerCase() === safeName) return false;
+      return true;
+    });
+  }, [agents, pipelineName]);
 
   useEffect(() => {
     if (node) {
@@ -64,6 +124,7 @@ export default memo(function NodeConfig() {
       setLoopTimeout(node.loop_timeout ?? 0);
       setConfirmDelete(false);
       setShowPreview(false);
+      setSimpleRetry((node.retry?.max ?? 0) > 0);
     }
   }, [node]);
 
@@ -76,8 +137,8 @@ export default memo(function NodeConfig() {
         .replace(/>/g, "&gt;");
       return `<pre class="code-preview"><code>${escaped}</code></pre>`;
     }
-    return marked.parse(instructions) as string;
-  }, [instructions, node]);
+    return markedRef.current ? (markedRef.current.parse(instructions) as string) : instructions;
+  }, [instructions, node, markedReady]);
 
   if (!node) {
     return (
@@ -90,8 +151,14 @@ export default memo(function NodeConfig() {
   const meta = NODE_TYPE_META[node.type as NodeType];
 
   const handleSave = () => {
+    let effectiveRetryMax = retryMax;
+    let effectiveRetryDelay = retryDelay;
+    if (isSimple) {
+      effectiveRetryMax = simpleRetry ? 3 : 0;
+      effectiveRetryDelay = simpleRetry ? 5 : 0;
+    }
     const retry: RetryPolicy | undefined =
-      retryMax > 0 ? { max: retryMax, delay: retryDelay } : undefined;
+      effectiveRetryMax > 0 ? { max: effectiveRetryMax, delay: effectiveRetryDelay } : undefined;
 
     const toolsList = requiresTools
       .split(",")
@@ -129,6 +196,38 @@ export default memo(function NodeConfig() {
     selectNode(null);
   };
 
+  const insertOutputRef = (nodeId: string) => {
+    const ref = `{output.${nodeId}}`;
+    if (!instructions.includes(ref)) {
+      setInstructions((prev) => (prev ? `${prev}\n${ref}` : ref));
+    }
+  };
+
+  const getInstructionLabel = () => {
+    if (isSimple) {
+      if (node.type === "ai-task") return "What should this step do?";
+      if (node.type === "shell") return "Command to run";
+      if (node.type === "git") return "Git command";
+      if (isLoop(node.type)) return "Items to loop over";
+      return "Instructions";
+    }
+    if (isCodeNode(node.type)) return "Command";
+    if (isLoop(node.type)) return "Items Source";
+    return "Instructions";
+  };
+
+  const getInstructionPlaceholder = () => {
+    if (isSimple) {
+      if (node.type === "ai-task") return 'Describe what Claude should do, e.g., "Review the code for bugs and suggest fixes"';
+      if (node.type === "shell") return "e.g., npm test";
+      if (node.type === "git") return "e.g., git add -A && git commit";
+      return "Describe what this step should do...";
+    }
+    if (node.type === "shell") return "e.g., npm test";
+    if (isLoop(node.type)) return "{output.upstream-node} or one item per line";
+    return "Describe what this step should do...";
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-col gap-4 overflow-y-auto p-4">
@@ -136,9 +235,11 @@ export default memo(function NodeConfig() {
         <div className="flex items-center gap-2">
           <NodeIcon type={node.type as NodeType} className="h-4 w-4" />
           <span className="text-xs font-medium text-zinc-400">
-            {meta.label}
+            {isSimple ? meta.friendlyLabel : meta.label}
           </span>
-          <span className="text-[10px] text-zinc-600">{node.id}</span>
+          {!isSimple && (
+            <span className="text-[10px] text-zinc-600">{node.id}</span>
+          )}
         </div>
 
         {/* Name */}
@@ -158,7 +259,7 @@ export default memo(function NodeConfig() {
         {isComment(node.type) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
-              Comment Text
+              {isSimple ? "Note" : "Comment Text"}
             </label>
             <textarea
               value={instructions}
@@ -198,22 +299,53 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
+        {/* "Use output from" dropdown (Simple Mode only) */}
+        {isSimple && !isComment(node.type) && !isSubPipeline(node.type) && upstreamNodes.length > 0 && (
+          <div>
+            <label className="mb-1 flex items-center gap-1 text-xs font-medium text-zinc-400">
+              Use output from
+              <HelpIcon text="Insert a reference to a previous step's output into the instructions below." />
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {upstreamNodes.map((un) => (
+                <button
+                  key={un.id}
+                  type="button"
+                  onClick={() => insertOutputRef(un.id)}
+                  className={`rounded border px-2 py-1 text-[11px] transition-colors ${
+                    instructions.includes(`{output.${un.id}}`)
+                      ? "border-violet-500/50 bg-violet-500/10 text-violet-300"
+                      : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-violet-500/30 hover:text-zinc-200"
+                  }`}
+                >
+                  {un.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Instructions (hidden for sub-pipeline and comment nodes) */}
         {!isSubPipeline(node.type) && !isComment(node.type) && (
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <label className="text-xs font-medium text-zinc-400">
-                {isCodeNode(node.type) ? "Command" : isLoop(node.type) ? "Items Source" : "Instructions"}
+              <label className="flex items-center gap-1 text-xs font-medium text-zinc-400">
+                {getInstructionLabel()}
+                {isSimple && (
+                  <HelpIcon text="Tell Claude what to do. Be specific about the expected output." />
+                )}
               </label>
-              <button
-                type="button"
-                onClick={() => setShowPreview((p) => !p)}
-                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
-              >
-                {showPreview ? "Edit" : "Preview"}
-              </button>
+              {!isSimple && (
+                <button
+                  type="button"
+                  onClick={() => setShowPreview((p) => !p)}
+                  className="rounded px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+                >
+                  {showPreview ? "Edit" : "Preview"}
+                </button>
+              )}
             </div>
-            {showPreview ? (
+            {showPreview && !isSimple ? (
               <div
                 className="markdown-preview w-full overflow-y-auto rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200"
                 style={{ minHeight: "7.5rem" }}
@@ -223,22 +355,18 @@ export default memo(function NodeConfig() {
               <textarea
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
-                rows={5}
-                className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-                placeholder={
-                  node.type === "shell"
-                    ? "e.g., npm test"
-                    : isLoop(node.type)
-                      ? "{output.upstream-node} or one item per line"
-                      : "Describe what this step should do..."
-                }
+                rows={isSimple ? 4 : 5}
+                className={`w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none ${
+                  !isSimple ? "font-mono" : ""
+                }`}
+                placeholder={getInstructionPlaceholder()}
               />
             )}
           </div>
         )}
 
-        {/* Loop separator */}
-        {isLoop(node.type) && (
+        {/* Loop separator (advanced mode only in simple mode) */}
+        {isLoop(node.type) && !isSimple && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Separator
@@ -269,8 +397,8 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
-        {/* Loop max iterations */}
-        {isLoop(node.type) && (
+        {/* Loop max iterations (advanced mode only) */}
+        {isLoop(node.type) && !isSimple && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Max Iterations
@@ -289,8 +417,8 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
-        {/* Loop model override */}
-        {isLoop(node.type) && (
+        {/* Loop model override (advanced mode only) */}
+        {isLoop(node.type) && !isSimple && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Loop Model
@@ -318,9 +446,7 @@ export default memo(function NodeConfig() {
               Children
             </label>
             <div className="rounded border border-zinc-700 bg-zinc-800 p-2 max-h-40 overflow-y-auto">
-              {currentPipeline.nodes
-                .filter((n) => n.id !== node.id && n.type !== "parallel" && n.type !== "loop")
-                .map((n) => (
+              {eligibleChildNodes.map((n) => (
                   <label key={n.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-zinc-700/50 cursor-pointer">
                     <input
                       type="checkbox"
@@ -338,7 +464,7 @@ export default memo(function NodeConfig() {
                     <span className="text-[10px] text-zinc-600">{n.type}</span>
                   </label>
                 ))}
-              {currentPipeline.nodes.filter((n) => n.id !== node.id && n.type !== "parallel" && n.type !== "loop").length === 0 && (
+              {eligibleChildNodes.length === 0 && (
                 <p className="text-[10px] text-zinc-600 px-1">No other nodes in pipeline</p>
               )}
             </div>
@@ -353,8 +479,11 @@ export default memo(function NodeConfig() {
         {/* Agent selector (AI tasks only, not comments) */}
         {!isComment(node.type) && node.type === "ai-task" && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
+            <label className="mb-1 flex items-center gap-1 text-xs font-medium text-zinc-400">
               Agent
+              {isSimple && (
+                <HelpIcon text="Choose a pre-configured Claude agent, or leave blank for the default." />
+              )}
             </label>
             <select
               value={agent}
@@ -362,39 +491,30 @@ export default memo(function NodeConfig() {
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
             >
               <option value="">None (use instructions only)</option>
-              {agents
-                .filter((a) => {
-                  // Filter out agents that would cause self-reference with the current pipeline
-                  if (!currentPipeline) return true;
-                  const safeName = currentPipeline.name.replace(/[^a-zA-Z0-9\-_]/g, '-').toLowerCase();
-                  const aNameLower = a.name.toLowerCase();
-                  // Block: prefixed auto-generated agent (_pipeline--ticket-to-pr)
-                  if (aNameLower === `_pipeline--${safeName}`) return false;
-                  // Block: unprefixed agent with same name (ticket-to-pr)
-                  if (aNameLower === safeName) return false;
-                  // Block: any pipeline-origin agent whose display_name matches
-                  if (a.origin === "pipeline" && (a.display_name ?? "").toLowerCase() === safeName) return false;
-                  return true;
-                })
-                .map((a) => (
+              {filteredAgents.map((a) => (
                   <option key={a.path} value={a.name}>
                     {a.display_name ?? a.name}{a.origin === "pipeline" ? " (pipeline)" : ""}
                   </option>
                 ))}
             </select>
-            <p className="mt-1 text-[10px] text-zinc-600">
-              {agent
-                ? `Will run: claude --agent ${agent} --print "..."`
-                : "Will run: claude --print \"...\""}
-            </p>
+            {!isSimple && (
+              <p className="mt-1 text-[10px] text-zinc-600">
+                {agent
+                  ? `Will run: claude --agent ${agent} --print "..."`
+                  : "Will run: claude --print \"...\""}
+              </p>
+            )}
           </div>
         )}
 
         {/* Model selector (AI tasks only) */}
         {!isComment(node.type) && node.type === "ai-task" && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
+            <label className="mb-1 flex items-center gap-1 text-xs font-medium text-zinc-400">
               Model
+              {isSimple && (
+                <HelpIcon text="Pick which AI model to use. Haiku is fastest, Opus is most capable." />
+              )}
             </label>
             <select
               value={model}
@@ -406,13 +526,15 @@ export default memo(function NodeConfig() {
               <option value="claude-opus-4-6">Opus 4.6</option>
               <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
             </select>
-            <p className="mt-1 text-[10px] text-zinc-600">
-              {model
-                ? `Will use: --model ${model}`
-                : currentPipeline?.default_model
-                  ? `Uses pipeline default: ${currentPipeline.default_model}`
-                  : "Uses default model"}
-            </p>
+            {!isSimple && (
+              <p className="mt-1 text-[10px] text-zinc-600">
+                {model
+                  ? `Will use: --model ${model}`
+                  : currentPipeline?.default_model
+                    ? `Uses pipeline default: ${currentPipeline.default_model}`
+                    : "Uses default model"}
+              </p>
+            )}
           </div>
         )}
 
@@ -435,8 +557,8 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
-        {/* Required MCP Tools (AI tasks only, not comments) */}
-        {!isComment(node.type) && node.type === "ai-task" && (
+        {/* Required MCP Tools (advanced mode only) */}
+        {!isSimple && !isComment(node.type) && node.type === "ai-task" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Required MCP Tools
@@ -454,8 +576,8 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
-        {/* Inputs (hidden for comments) */}
-        {!isComment(node.type) && (
+        {/* Inputs (advanced mode only) */}
+        {!isSimple && !isComment(node.type) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Inputs
@@ -470,8 +592,8 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
-        {/* Outputs */}
-        {!isComment(node.type) && (
+        {/* Outputs (advanced mode only) */}
+        {!isSimple && !isComment(node.type) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Outputs
@@ -486,60 +608,102 @@ export default memo(function NodeConfig() {
           </div>
         )}
 
-        {/* Retry */}
+        {/* Retry — Simple Mode: checkbox, Advanced Mode: full controls */}
         {!isComment(node.type) && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
-              Retry Policy
-            </label>
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="mb-0.5 block text-[10px] text-zinc-500">
-                  Max attempts
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={retryMax}
-                  onChange={(e) => setRetryMax(Number(e.target.value))}
-                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="mb-0.5 block text-[10px] text-zinc-500">
-                  Delay (sec)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={retryDelay}
-                  onChange={(e) => setRetryDelay(Number(e.target.value))}
-                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
-                />
+          isSimple ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="simple-retry"
+                checked={simpleRetry}
+                onChange={(e) => {
+                  setSimpleRetry(e.target.checked);
+                  if (e.target.checked) {
+                    setRetryMax(3);
+                    setRetryDelay(5);
+                  } else {
+                    setRetryMax(0);
+                    setRetryDelay(0);
+                  }
+                }}
+                className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-violet-500 focus:ring-violet-500"
+              />
+              <label htmlFor="simple-retry" className="flex items-center gap-1 text-xs text-zinc-400">
+                Retry on failure
+                <HelpIcon text="If this step fails, retry it automatically up to 3 times." />
+              </label>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                Retry Policy
+              </label>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="mb-0.5 block text-[10px] text-zinc-500">
+                    Max attempts
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={retryMax}
+                    onChange={(e) => setRetryMax(Number(e.target.value))}
+                    className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="mb-0.5 block text-[10px] text-zinc-500">
+                    Delay (sec)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={retryDelay}
+                    onChange={(e) => setRetryDelay(Number(e.target.value))}
+                    className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          )
         )}
 
-        {/* Timeout */}
+        {/* Timeout — Simple Mode: dropdown, Advanced Mode: number input */}
         {!isComment(node.type) && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
-              {isLoop(node.type) ? "Per-Iteration Timeout (seconds)" : "Timeout (seconds)"}
-            </label>
-            <input
-              type="number"
-              min={0}
-              value={timeout}
-              onChange={(e) => setTimeout_(Number(e.target.value))}
-              placeholder="0 = no timeout"
-              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
-            />
-          </div>
+          isSimple ? (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                Timeout
+              </label>
+              <select
+                value={TIMEOUT_OPTIONS.some((o) => o.value === timeout) ? timeout : 0}
+                onChange={(e) => setTimeout_(Number(e.target.value))}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+              >
+                {TIMEOUT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {isLoop(node.type) ? "Per-Iteration Timeout (seconds)" : "Timeout (seconds)"}
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={timeout}
+                onChange={(e) => setTimeout_(Number(e.target.value))}
+                placeholder="0 = no timeout"
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none"
+              />
+            </div>
+          )
         )}
 
-        {/* Total Loop Timeout */}
-        {isLoop(node.type) && (
+        {/* Total Loop Timeout (advanced mode only) */}
+        {isLoop(node.type) && !isSimple && (
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
               Total Loop Timeout (seconds)

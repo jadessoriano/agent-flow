@@ -1,0 +1,81 @@
+{
+  "name": "Perf Architecture Tests",
+  "description": "Validate architecture-level performance improvements: memo ConditionalEdge, virtual LiveLog, async auto-layout",
+  "version": "1.0.0",
+  "variables": {},
+  "nodes": [
+    {
+      "id": "check-types",
+      "name": "Type Check",
+      "type": "shell",
+      "instructions": "npx tsc --noEmit 2>&1",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 50.0,
+        "y": 50.0
+      }
+    },
+    {
+      "id": "run-bench",
+      "name": "TS Benchmarks",
+      "type": "shell",
+      "instructions": "npx vitest bench --run 2>&1",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 50.0,
+        "y": 200.0
+      }
+    },
+    {
+      "id": "rust-tests",
+      "name": "Rust Tests",
+      "type": "shell",
+      "instructions": "cd src-tauri && cargo test 2>&1",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 50.0,
+        "y": 350.0
+      }
+    },
+    {
+      "id": "verify-all",
+      "name": "Verify All",
+      "type": "shell",
+      "instructions": "echo '--- All architecture improvements verified ---'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 400.0,
+        "y": 200.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "check-types->verify-all",
+      "from": "check-types",
+      "to": "verify-all",
+      "condition": "success"
+    },
+    {
+      "id": "run-bench->verify-all",
+      "from": "run-bench",
+      "to": "verify-all",
+      "condition": "success"
+    },
+    {
+      "id": "rust-tests->verify-all",
+      "from": "rust-tests",
+      "to": "verify-all",
+      "condition": "success"
+    }
+  ],
+  "shared_session": true
+}

@@ -1,0 +1,451 @@
+{
+  "name": "ticket-to-pr",
+  "description": "Complete development pipeline: takes a Jira ticket (or task description) and delivers a ready-to-merge PR.",
+  "version": "1.0.0",
+  "variables": {
+    "BASE_BRANCH": "develop",
+    "JIRA_BASE_URL": "https://betrnk.atlassian.net/browse",
+    "JIRA_PROJECT_KEY": "ML"
+  },
+  "nodes": [
+    {
+      "id": "parse-input",
+      "name": "Parse Input",
+      "type": "ai-task",
+      "instructions": "Parse the pipeline input and determine the ticket type. Accept any of these formats:\n- Jira ticket key: `$JIRA_PROJECT_KEY-300`, `$JIRA_PROJECT_KEY-155`\n- Jira URL: `$JIRA_BASE_URL/$JIRA_PROJECT_KEY-300`\n- Plain description: e.g. \"add session timeout feature\"\n\nExtract the Jira key if present. If a plain description is given, flag that no Jira ticket exists so subsequent steps skip Jira-specific logic.",
+      "inputs": [
+        "ticketInput"
+      ],
+      "outputs": [
+        "jiraKey",
+        "hasJiraTicket",
+        "rawDescription"
+      ],
+      "cache": false,
+      "position": {
+        "x": 40.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "fetch-jira-ticket",
+      "name": "Fetch Jira Ticket",
+      "type": "ai-task",
+      "instructions": "If a Jira key was parsed, use the Atlassian MCP tools to fetch the full ticket details:\n- Summary (title)\n- Description (requirements)\n- Issue type (Bug, Task, Story)\n- Priority\n\nThis becomes the source of truth for what to implement. If no Jira key exists, use the raw description as the requirements and infer the issue type (default to Task).",
+      "inputs": [
+        "jiraKey",
+        "hasJiraTicket",
+        "rawDescription"
+      ],
+      "outputs": [
+        "summary",
+        "issueType",
+        "description",
+        "priority"
+      ],
+      "cache": false,
+      "position": {
+        "x": 360.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "create-worktree",
+      "name": "Create Worktree",
+      "type": "ai-task",
+      "instructions": "Fetch latest remote and create a new worktree branched from origin/$BASE_BRANCH. Run the following bash commands:\n\n1. `git fetch origin $BASE_BRANCH`\n2. Determine BRANCH_NAME from the ticket info:\n   - Bug/Fix → `fix/$JIRA_PROJECT_KEY-XXX-kebab-description`\n   - Feature/Story/Task → `feature/$JIRA_PROJECT_KEY-XXX-kebab-description`\n   - No Jira → `fix/kebab-description` or `feature/kebab-description`\n3. Compute WORKTREE_DIR: `.worktrees/{branch-name-with-slashes-replaced-by-dashes}`\n4. Clean slate — if the worktree already exists, remove it first:\n   ```\n   git worktree remove \"$WORKTREE_DIR\" --force\n   git branch -D \"$BRANCH_NAME\" 2>/dev/null || true\n   ```\n5. Create the worktree: `git worktree add \"$WORKTREE_DIR\" -b $BRANCH_NAME origin/$BASE_BRANCH`\n\nOutput the branchName and worktreePath (absolute path to the worktree directory) so downstream nodes can use them.",
+      "inputs": [
+        "summary",
+        "issueType"
+      ],
+      "outputs": [
+        "branchName",
+        "worktreePath"
+      ],
+      "cache": false,
+      "position": {
+        "x": 680.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "bootstrap-worktree",
+      "name": "Bootstrap Worktree",
+      "type": "shell",
+      "instructions": "WORKTREE=\"$WORKTREE_PATH\"\n\nif [ -z \"$WORKTREE\" ]; then\n  echo \"ERROR: WORKTREE_PATH not set\"\n  exit 1\nfi\n\n# Backend: copy vendor if exists, otherwise composer install\nif [ -d \"backend/vendor\" ]; then\n  cp -r backend/vendor \"$WORKTREE/backend/vendor\"\nelse\n  cd \"$WORKTREE/backend\" && composer install --no-interaction\nfi\ncp backend/.env \"$WORKTREE/backend/.env\" 2>/dev/null || true\n\n# Frontend: copy node_modules if exists, otherwise npm install\nif [ -d \"frontend/node_modules\" ]; then\n  cp -r frontend/node_modules \"$WORKTREE/frontend/node_modules\"\nelse\n  cd \"$WORKTREE/frontend\" && npm install\nfi\n\necho \"Bootstrap complete for $WORKTREE\"",
+      "inputs": [
+        "worktreePath"
+      ],
+      "outputs": [
+        "bootstrapComplete"
+      ],
+      "cache": false,
+      "position": {
+        "x": 1000.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "plan-implementation",
+      "name": "Plan Implementation",
+      "type": "ai-task",
+      "instructions": "Before writing any code:\n1. Read the Jira ticket requirements (or task description)\n2. Explore the relevant existing code to understand patterns\n3. Identify which files need to change\n4. Plan the approach\n\nIf the scope is large (10+ files), present the plan for human approval before proceeding.",
+      "inputs": [
+        "summary",
+        "description",
+        "issueType",
+        "worktreePath"
+      ],
+      "outputs": [
+        "implementationPlan",
+        "filesToChange",
+        "isLargeScope"
+      ],
+      "cache": false,
+      "position": {
+        "x": 1320.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "approve-plan",
+      "name": "Approve Implementation Plan",
+      "type": "approval-gate",
+      "instructions": "Review the implementation plan before proceeding. This gate activates when the scope is large (10+ files) or when the requirements are ambiguous. Approve to continue with implementation, or reject with feedback to revise the plan.",
+      "inputs": [
+        "implementationPlan",
+        "filesToChange",
+        "isLargeScope"
+      ],
+      "outputs": [
+        "planApproved"
+      ],
+      "cache": false,
+      "position": {
+        "x": 1640.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "implement-changes",
+      "name": "Implement Changes",
+      "type": "ai-task",
+      "instructions": "Write the code following project conventions:\n\n**Backend (Laravel/PHP)**:\n- Services in `backend/app/Services/`\n- Enums in `backend/app/Enums/` — PascalCase string values ALWAYS\n- Events in `backend/app/Events/`\n- API routes in `backend/routes/api.php`\n- Use existing patterns — read similar code first\n\n**Frontend (Next.js/TypeScript)**:\n- Components in `frontend/src/components/`\n- Hooks in `frontend/src/hooks/`\n- Contexts in `frontend/src/contexts/`\n- TanStack React Query for data fetching\n- Laravel Echo for WebSocket subscriptions\n\nFollow the implementation plan exactly. Read existing similar code before writing new code.",
+      "inputs": [
+        "implementationPlan",
+        "worktreePath",
+        "description"
+      ],
+      "outputs": [
+        "changedFiles",
+        "implementationSummary"
+      ],
+      "timeout": 600,
+      "cache": false,
+      "position": {
+        "x": 1960.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "write-tests",
+      "name": "Write Tests",
+      "type": "ai-task",
+      "instructions": "Write tests following project conventions:\n\n**Backend (Pest)**:\n- Use `test()`, `expect()`, `beforeEach()`, `RefreshDatabase`\n- Feature tests: `backend/tests/Feature/{Domain}/{Name}Test.php`\n- Unit tests: `backend/tests/Unit/{Domain}/{Name}Test.php`\n- Use existing factories from `backend/database/factories/`\n\n**Frontend (Vitest + React Testing Library)**:\n- Co-locate tests with components\n- Test user interactions and rendering\n\nEnsure tests cover the main functionality and edge cases from the ticket requirements.",
+      "inputs": [
+        "changedFiles",
+        "implementationSummary",
+        "worktreePath"
+      ],
+      "outputs": [
+        "testFiles"
+      ],
+      "cache": false,
+      "position": {
+        "x": 2280.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "run-tests",
+      "name": "Run Tests",
+      "type": "parallel",
+      "instructions": "Run backend and frontend tests in parallel.",
+      "inputs": [
+        "worktreePath",
+        "testFiles"
+      ],
+      "outputs": [
+        "backendTestResult",
+        "frontendTestResult"
+      ],
+      "children": [
+        "run-backend-tests",
+        "run-frontend-tests"
+      ],
+      "cache": false,
+      "position": {
+        "x": 2600.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "run-backend-tests",
+      "name": "Run Backend Tests",
+      "type": "shell",
+      "instructions": "cd \"$WORKTREE_PATH/backend\" && php artisan test",
+      "inputs": [
+        "worktreePath"
+      ],
+      "outputs": [
+        "backendTestResult"
+      ],
+      "retry": {
+        "max": 3,
+        "delay": 5
+      },
+      "cache": false,
+      "position": {
+        "x": 2920.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "run-frontend-tests",
+      "name": "Run Frontend Tests",
+      "type": "shell",
+      "instructions": "cd \"$WORKTREE_PATH/frontend\" && npm test && npm run build",
+      "inputs": [
+        "worktreePath"
+      ],
+      "outputs": [
+        "frontendTestResult"
+      ],
+      "retry": {
+        "max": 3,
+        "delay": 5
+      },
+      "cache": false,
+      "position": {
+        "x": 2920.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "fix-failures",
+      "name": "Fix Test Failures",
+      "type": "ai-task",
+      "instructions": "If any tests failed:\n1. Read the failing test AND the source code it tests\n2. Determine the cause — bug in code, outdated test, or bad test\n3. Fix accordingly\n4. Re-run the failing tests to verify the fix\n\nIf tests pass on the first run, this node is a no-op and passes through immediately.",
+      "inputs": [
+        "backendTestResult",
+        "frontendTestResult",
+        "worktreePath"
+      ],
+      "outputs": [
+        "allTestsPassing"
+      ],
+      "retry": {
+        "max": 3,
+        "delay": 10
+      },
+      "timeout": 300,
+      "cache": false,
+      "position": {
+        "x": 3240.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "update-changelog",
+      "name": "Update Changelog",
+      "type": "ai-task",
+      "instructions": "Update the root `CHANGELOG.md` with a new entry at the TOP (below any header):\n\n```markdown\n## [YYYY-MM-DD] - Short Description\n\n### Added / Changed / Fixed / Removed\n- **Backend**: Description ($JIRA_PROJECT_KEY-XXX)\n- **Frontend**: Description\n\n---\n```\n\nRules:\n- New entry at TOP, below header\n- Prefix lines with `**Backend**:` / `**Frontend**:` / `**Admin**:`\n- Include Jira key if applicable\n- If frontend-only changes, also update `frontend/CHANGELOG.md`",
+      "inputs": [
+        "implementationSummary",
+        "changedFiles",
+        "summary",
+        "jiraKey"
+      ],
+      "outputs": [
+        "changelogUpdated"
+      ],
+      "cache": false,
+      "position": {
+        "x": 3880.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "commit-changes",
+      "name": "Commit Changes",
+      "type": "git",
+      "instructions": "cd \"$WORKTREE_PATH\" && git add -A && git commit -m \"${ISSUE_TYPE}: ${SUMMARY} (${JIRA_KEY})\" && git add CHANGELOG.md frontend/CHANGELOG.md 2>/dev/null && git commit -m \"docs: update changelog\" 2>/dev/null; git rev-parse HEAD",
+      "inputs": [
+        "worktreePath",
+        "changelogUpdated",
+        "summary",
+        "issueType",
+        "jiraKey"
+      ],
+      "outputs": [
+        "commitHash"
+      ],
+      "cache": false,
+      "position": {
+        "x": 4200.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "push-and-create-pr",
+      "name": "Push & Create PR",
+      "type": "shell",
+      "instructions": "cd \"$WORKTREE_PATH\" && git push -u origin \"$BRANCH_NAME\" && gh pr create --base \"$BASE_BRANCH\" --title \"${SUMMARY} (${JIRA_KEY})\" --body \"## Summary\n\n## Jira\n[$JIRA_KEY]($JIRA_BASE_URL/$JIRA_KEY)\n\n## Test plan\n- [ ] Backend tests pass\n- [ ] Frontend tests pass\n- [ ] Build succeeds\"",
+      "inputs": [
+        "worktreePath",
+        "branchName",
+        "commitHash",
+        "summary",
+        "issueType",
+        "jiraKey"
+      ],
+      "outputs": [
+        "prUrl"
+      ],
+      "cache": false,
+      "position": {
+        "x": 4520.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "report-results",
+      "name": "Report Results",
+      "type": "ai-task",
+      "instructions": "Compile and return a final report with:\n- PR URL\n- Jira ticket linked (if applicable)\n- Tests status (all passing)\n- Changelog entries added\n- Files changed summary (count and list)\n- Worktree location (in case user needs manual testing)\n\nFormat as a clean, readable summary.",
+      "inputs": [
+        "prUrl",
+        "jiraKey",
+        "allTestsPassing",
+        "changelogUpdated",
+        "changedFiles",
+        "worktreePath"
+      ],
+      "outputs": [
+        "finalReport"
+      ],
+      "cache": false,
+      "position": {
+        "x": 4840.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "node-1771656684977-0",
+      "name": "Rust test check builds...",
+      "type": "sub-pipeline",
+      "instructions": "",
+      "inputs": [],
+      "outputs": [],
+      "pipeline_ref": "rust-check-test-build",
+      "cache": false,
+      "position": {
+        "x": 3560.0,
+        "y": 40.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "parse-input",
+      "to": "fetch-jira-ticket"
+    },
+    {
+      "id": "e2",
+      "from": "fetch-jira-ticket",
+      "to": "create-worktree"
+    },
+    {
+      "id": "e3",
+      "from": "create-worktree",
+      "to": "bootstrap-worktree"
+    },
+    {
+      "id": "e4",
+      "from": "bootstrap-worktree",
+      "to": "plan-implementation"
+    },
+    {
+      "id": "e5",
+      "from": "plan-implementation",
+      "to": "approve-plan"
+    },
+    {
+      "id": "e6",
+      "from": "approve-plan",
+      "to": "implement-changes",
+      "condition": "success"
+    },
+    {
+      "id": "e7",
+      "from": "approve-plan",
+      "to": "plan-implementation",
+      "condition": "failure"
+    },
+    {
+      "id": "e8",
+      "from": "implement-changes",
+      "to": "write-tests"
+    },
+    {
+      "id": "e9",
+      "from": "write-tests",
+      "to": "run-tests"
+    },
+    {
+      "id": "e10",
+      "from": "run-backend-tests",
+      "to": "fix-failures"
+    },
+    {
+      "id": "e11",
+      "from": "run-frontend-tests",
+      "to": "fix-failures"
+    },
+    {
+      "id": "e13",
+      "from": "fix-failures",
+      "to": "run-tests",
+      "condition": "failure"
+    },
+    {
+      "id": "e14",
+      "from": "update-changelog",
+      "to": "commit-changes"
+    },
+    {
+      "id": "e15",
+      "from": "commit-changes",
+      "to": "push-and-create-pr"
+    },
+    {
+      "id": "e16",
+      "from": "push-and-create-pr",
+      "to": "report-results"
+    },
+    {
+      "id": "edge-1771656686616-1",
+      "from": "fix-failures",
+      "to": "node-1771656684977-0",
+      "condition": "success"
+    },
+    {
+      "id": "edge-1771656694971-2",
+      "from": "node-1771656684977-0",
+      "to": "update-changelog",
+      "condition": "success"
+    }
+  ],
+  "shared_session": true
+}

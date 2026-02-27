@@ -1235,6 +1235,17 @@ async fn run_pipeline_loop(
         .iter()
         .map(|n| (n.id.clone(), n.clone()))
         .collect();
+
+    // Wrap read-only data in Arc to avoid expensive deep clones on every spawn.
+    // Arc::clone is just a pointer-sized atomic increment.
+    let shared_variables = Arc::new(pipeline.variables.clone());
+    let shared_inputs = Arc::new(inputs.clone());
+    let shared_cli_path = Arc::new(cli_path.to_string());
+    let shared_project_path = Arc::new(project_path.to_string());
+    let shared_pipeline_name = Arc::new(pipeline.name.clone());
+    let shared_edges = Arc::new(pipeline.edges.clone());
+    let shared_default_model = Arc::new(pipeline.default_model.clone());
+
     let mut results: HashMap<String, NodeResult> = HashMap::new();
     let mut node_outputs: HashMap<String, String> = HashMap::new();
     let mut skipped: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1468,16 +1479,16 @@ async fn run_pipeline_loop(
                             let a = app.clone();
                             let n = cn.clone();
                             let r = run_id.to_string();
-                            let v = pipeline.variables.clone();
-                            let i = inputs.clone();
+                            let v = shared_variables.clone();
+                            let i = shared_inputs.clone();
                             let o = node_outputs.clone();
-                            let c = cli_path.to_string();
-                            let p = project_path.to_string();
+                            let c = shared_cli_path.clone();
+                            let p = shared_project_path.clone();
                             let h = active_run.clone();
                             let crx = cancel_rx.clone();
-                            let pn = pipeline.name.clone();
-                            let pe = pipeline.edges.clone();
-                            let dm = pipeline.default_model.clone();
+                            let pn = shared_pipeline_name.clone();
+                            let pe = shared_edges.clone();
+                            let dm = shared_default_model.clone();
                             join_set.spawn(async move {
                                 execute_node(&a, &n, &r, &v, &i, &o, &c, &p, &h, &crx, &pn, &pe, false, dm.as_deref()).await
                             });
@@ -2210,16 +2221,16 @@ async fn run_pipeline_loop(
             let a = app.clone();
             let n = node.clone();
             let r = run_id.to_string();
-            let v = pipeline.variables.clone();
-            let i = inputs.clone();
+            let v = shared_variables.clone();
+            let i = shared_inputs.clone();
             let o = node_outputs.clone();
-            let c = cli_path.to_string();
-            let p = project_path.to_string();
+            let c = shared_cli_path.clone();
+            let p = shared_project_path.clone();
             let h = active_run.clone();
             let crx = cancel_rx.clone();
-            let pn = pipeline.name.clone();
-            let pe = pipeline.edges.clone();
-            let dm = pipeline.default_model.clone();
+            let pn = shared_pipeline_name.clone();
+            let pe = shared_edges.clone();
+            let dm = shared_default_model.clone();
             join_set.spawn(
                 async move { execute_node(&a, &n, &r, &v, &i, &o, &c, &p, &h, &crx, &pn, &pe, continue_session, dm.as_deref()).await },
             );
@@ -2560,16 +2571,16 @@ async fn run_pipeline_loop(
                 let a = app.clone();
                 let n = node.clone();
                 let r = run_id.to_string();
-                let v = pipeline.variables.clone();
-                let i = inputs.clone();
+                let v = shared_variables.clone();
+                let i = shared_inputs.clone();
                 let o = node_outputs.clone();
-                let c = cli_path.to_string();
-                let p = project_path.to_string();
+                let c = shared_cli_path.clone();
+                let p = shared_project_path.clone();
                 let h = active_run.clone();
                 let crx = cancel_rx.clone();
-                let pn = pipeline.name.clone();
-                let pe = pipeline.edges.clone();
-                let dm = pipeline.default_model.clone();
+                let pn = shared_pipeline_name.clone();
+                let pe = shared_edges.clone();
+                let dm = shared_default_model.clone();
                 // Re-queued nodes start fresh sessions (back-edge re-executions)
                 join_set.spawn(async move {
                     execute_node(&a, &n, &r, &v, &i, &o, &c, &p, &h, &crx, &pn, &pe, false, dm.as_deref()).await
@@ -2867,6 +2878,9 @@ pub async fn start_run(
             .await;
         }
 
+        // Invalidate usage stats cache so next query reflects this run
+        db::invalidate_usage_stats_cache();
+
         {
             let mut guard = arh.lock().await;
             if let Some(run) = guard.as_mut() {
@@ -3038,6 +3052,9 @@ pub async fn resume_run(
         )
         .await;
 
+        // Invalidate usage stats cache so next query reflects this run
+        db::invalidate_usage_stats_cache();
+
         {
             let mut guard = arh.lock().await;
             if let Some(run) = guard.as_mut() {
@@ -3159,25 +3176,45 @@ pub async fn estimate_run(
         .map(|s| s.inner().clone())
         .ok_or_else(|| "Database not available".to_string())?;
 
-    let ai_count = pipeline
-        .nodes
-        .iter()
-        .filter(|n| n.node_type == "ai-task")
-        .count();
-    let shell_count = pipeline
-        .nodes
-        .iter()
-        .filter(|n| n.node_type == "shell" || n.node_type == "git")
-        .count();
+    // Build a map of loop-child node IDs to their estimated iteration count
+    let mut loop_multipliers: HashMap<String, usize> = HashMap::new(); // child_id -> estimated iterations
+    for node in &pipeline.nodes {
+        if node.node_type == "loop" {
+            let iterations = node.max_iterations.unwrap_or(10) as usize; // default 10 if unknown
+            if let Some(children) = &node.children {
+                for cid in children {
+                    loop_multipliers.insert(cid.clone(), iterations);
+                }
+            }
+        }
+    }
+
+    // Count AI tasks with loop multiplier: children of loop nodes count as N iterations
+    let mut effective_ai_count: usize = 0;
+    let mut ai_count: usize = 0;
+    let mut shell_count: usize = 0;
+    for node in &pipeline.nodes {
+        match node.node_type.as_str() {
+            "ai-task" => {
+                ai_count += 1;
+                let multiplier = loop_multipliers.get(&node.id).copied().unwrap_or(1);
+                effective_ai_count += multiplier;
+            }
+            "shell" | "git" => {
+                shell_count += 1;
+            }
+            _ => {}
+        }
+    }
     let other_count = pipeline.nodes.len() - ai_count - shell_count;
 
     let avg = db::get_avg_ai_step_cost(&pool).await?;
 
     let (low, high) = if let Some(avg_cost) = avg {
-        if ai_count > 0 {
+        if effective_ai_count > 0 {
             (
-                Some(avg_cost * ai_count as f64 * 0.5),
-                Some(avg_cost * ai_count as f64 * 1.5),
+                Some(avg_cost * effective_ai_count as f64 * 0.5),
+                Some(avg_cost * effective_ai_count as f64 * 1.5),
             )
         } else {
             (None, None)

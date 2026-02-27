@@ -1,0 +1,61 @@
+{
+  "name": "rust-check-test-build",
+  "description": "Run cargo check, test, and build release binary on success",
+  "version": "1.0.0",
+  "variables": {
+    "package": "",
+    "target": ""
+  },
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Cargo Check",
+      "type": "shell",
+      "instructions": "cargo check",
+      "inputs": [],
+      "outputs": [],
+      "position": {
+        "x": 300.0,
+        "y": 100.0
+      }
+    },
+    {
+      "id": "node-2",
+      "name": "Cargo Test",
+      "type": "shell",
+      "instructions": "cargo test",
+      "inputs": [],
+      "outputs": [],
+      "position": {
+        "x": 300.0,
+        "y": 250.0
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "Build Release Binary",
+      "type": "shell",
+      "instructions": "cargo build --release",
+      "inputs": [],
+      "outputs": [],
+      "position": {
+        "x": 300.0,
+        "y": 400.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "from": "node-1",
+      "to": "node-2",
+      "condition": "success"
+    },
+    {
+      "id": "edge-2",
+      "from": "node-2",
+      "to": "node-3",
+      "condition": "success"
+    }
+  ]
+}

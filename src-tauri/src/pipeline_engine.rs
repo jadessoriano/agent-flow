@@ -126,12 +126,15 @@ pub fn list_pipelines(project_path: String) -> Result<Vec<PipelineInfo>, String>
         {
             let content =
                 fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
-            if let Ok(pipeline) = serde_json::from_str::<Pipeline>(&content) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                let name = val["name"].as_str().unwrap_or("").to_string();
+                let description = val["description"].as_str().unwrap_or("").to_string();
+                let node_count = val["nodes"].as_array().map_or(0, |a| a.len());
                 pipelines.push(PipelineInfo {
-                    name: pipeline.name.clone(),
+                    name,
                     path: path.to_string_lossy().to_string(),
-                    description: pipeline.description.clone(),
-                    node_count: pipeline.nodes.len(),
+                    description,
+                    node_count,
                 });
             }
         }
@@ -486,7 +489,7 @@ fn extract_json_from_fences(text: &str) -> Option<String> {
 }
 
 fn generate_agent_markdown(pipeline: &Pipeline) -> String {
-    let mut md = String::new();
+    let mut md = String::with_capacity(4096); // Pre-allocate 4KB
 
     md.push_str(&format!("# {}\n\n", pipeline.name));
 

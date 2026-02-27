@@ -6,7 +6,6 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import GeneratePrompt from "../modals/GeneratePrompt";
 import TemplatePickerModal from "../modals/TemplatePickerModal";
-
 export default function PipelineSelector() {
   const pipelines = usePipelineStore((s) => s.pipelines);
   const currentPipeline = usePipelineStore((s) => s.currentPipeline);
@@ -125,9 +124,11 @@ export default function PipelineSelector() {
                     }}
                     className="flex-1 text-left"
                   >
-                    <div className="truncate">{p.name}</div>
+                    <div className="flex items-center gap-1.5 truncate">
+                      {p.name}
+                    </div>
                     <div className="text-[10px] text-zinc-500">
-                      {p.node_count} nodes
+                      {p.node_count} {p.node_count === 1 ? "step" : "steps"}
                     </div>
                   </button>
                   <button

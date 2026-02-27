@@ -131,21 +131,28 @@ body,
   background-color: rgba(236, 72, 153, 0.15) !important;
   cursor: default !important;
 }
+.af-handle-child-parallel.react-flow__handle {
+  opacity: 0.5 !important;
+  border-color: rgba(59, 130, 246, 0.5) !important;    /* blue for parallel parent */
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  cursor: default !important;
+}
 
 /* Dragging a connection — show all handles except child handles (not valid targets) */
-.connecting-mode .af-handle.react-flow__handle:not(.af-handle-child) {
+.connecting-mode .af-handle.react-flow__handle:not(.af-handle-child):not(.af-handle-child-parallel) {
   opacity: 1 !important;
   border-color: #71717a !important;
   background-color: #3f3f46 !important;
 }
 
-.connecting-mode .af-handle.react-flow__handle:not(.af-handle-child):hover {
+.connecting-mode .af-handle.react-flow__handle:not(.af-handle-child):not(.af-handle-child-parallel):hover {
   border-color: #a1a1aa !important;
   background-color: #52525b !important;
 }
 
 /* Child handles stay dim during connection drag — they aren't valid targets */
-.connecting-mode .af-handle-child.react-flow__handle {
+.connecting-mode .af-handle-child.react-flow__handle,
+.connecting-mode .af-handle-child-parallel.react-flow__handle {
   opacity: 0.2 !important;
 }
 
@@ -210,6 +217,13 @@ body,
 .react-flow__edge.af-highlighted path,
 .react-flow__edge.af-highlighted marker polyline {
   opacity: 1 !important;
+  transition: opacity 0.35s ease-in-out;
+}
+.react-flow__edge.af-dimmed-hidden path,
+.react-flow__edge.af-dimmed-hidden marker polyline,
+.react-flow__edge.af-dimmed-hidden .react-flow__edge-textbg,
+.react-flow__edge.af-dimmed-hidden .nodrag {
+  opacity: 0 !important;
   transition: opacity 0.35s ease-in-out;
 }
 

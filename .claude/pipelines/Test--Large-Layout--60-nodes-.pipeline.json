@@ -1,0 +1,1116 @@
+{
+  "name": "Test: Large Layout (60 nodes)",
+  "description": "60-node pipeline to trigger async Web Worker layout (threshold: 50 nodes). Open this pipeline and click Auto-Layout — layout runs off main thread.",
+  "version": "1.0.0",
+  "variables": {},
+  "nodes": [
+    {
+      "id": "n01",
+      "name": "Start",
+      "type": "shell",
+      "instructions": "echo 'start'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 40.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n02",
+      "name": "Step 2",
+      "type": "shell",
+      "instructions": "echo 'step 2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 360.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n03",
+      "name": "Step 3",
+      "type": "shell",
+      "instructions": "echo 'step 3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 680.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n04",
+      "name": "Step 4",
+      "type": "shell",
+      "instructions": "echo 'step 4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 1000.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n05",
+      "name": "Step 5",
+      "type": "shell",
+      "instructions": "echo 'step 5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 1320.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n06",
+      "name": "Step 6",
+      "type": "shell",
+      "instructions": "echo 'step 6'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 1640.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n07",
+      "name": "Step 7",
+      "type": "shell",
+      "instructions": "echo 'step 7'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 1960.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n08",
+      "name": "Step 8",
+      "type": "shell",
+      "instructions": "echo 'step 8'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 2280.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n09",
+      "name": "Step 9",
+      "type": "shell",
+      "instructions": "echo 'step 9'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 2600.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n10",
+      "name": "Step 10",
+      "type": "shell",
+      "instructions": "echo 'step 10'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 2920.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n11",
+      "name": "Branch A-1",
+      "type": "shell",
+      "instructions": "echo 'a1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3240.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n12",
+      "name": "Branch A-2",
+      "type": "shell",
+      "instructions": "echo 'a2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3560.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n13",
+      "name": "Branch A-3",
+      "type": "shell",
+      "instructions": "echo 'a3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3880.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n14",
+      "name": "Branch A-4",
+      "type": "shell",
+      "instructions": "echo 'a4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4200.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n15",
+      "name": "Branch A-5",
+      "type": "shell",
+      "instructions": "echo 'a5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4520.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n16",
+      "name": "Branch B-1",
+      "type": "shell",
+      "instructions": "echo 'b1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3240.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n17",
+      "name": "Branch B-2",
+      "type": "shell",
+      "instructions": "echo 'b2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3560.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n18",
+      "name": "Branch B-3",
+      "type": "shell",
+      "instructions": "echo 'b3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3880.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n19",
+      "name": "Branch B-4",
+      "type": "shell",
+      "instructions": "echo 'b4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4200.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n20",
+      "name": "Branch B-5",
+      "type": "shell",
+      "instructions": "echo 'b5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4520.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n21",
+      "name": "Branch C-1",
+      "type": "shell",
+      "instructions": "echo 'c1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3240.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n22",
+      "name": "Branch C-2",
+      "type": "shell",
+      "instructions": "echo 'c2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3560.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n23",
+      "name": "Branch C-3",
+      "type": "shell",
+      "instructions": "echo 'c3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 3880.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n24",
+      "name": "Branch C-4",
+      "type": "shell",
+      "instructions": "echo 'c4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4200.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n25",
+      "name": "Branch C-5",
+      "type": "shell",
+      "instructions": "echo 'c5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4520.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n26",
+      "name": "Merge A",
+      "type": "shell",
+      "instructions": "echo 'merge a'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4840.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n27",
+      "name": "Merge B",
+      "type": "shell",
+      "instructions": "echo 'merge b'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4840.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n28",
+      "name": "Merge C",
+      "type": "shell",
+      "instructions": "echo 'merge c'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 4840.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n29",
+      "name": "Post A-1",
+      "type": "shell",
+      "instructions": "echo 'post a1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5160.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n30",
+      "name": "Post A-2",
+      "type": "shell",
+      "instructions": "echo 'post a2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5480.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n31",
+      "name": "Post B-1",
+      "type": "shell",
+      "instructions": "echo 'post b1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5160.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n32",
+      "name": "Post B-2",
+      "type": "shell",
+      "instructions": "echo 'post b2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5480.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n33",
+      "name": "Post C-1",
+      "type": "shell",
+      "instructions": "echo 'post c1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5160.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n34",
+      "name": "Post C-2",
+      "type": "shell",
+      "instructions": "echo 'post c2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5480.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n35",
+      "name": "Join All",
+      "type": "shell",
+      "instructions": "echo 'joined'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 5800.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n36",
+      "name": "Phase 2-1",
+      "type": "shell",
+      "instructions": "echo 'p2-1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6120.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n37",
+      "name": "Phase 2-2",
+      "type": "shell",
+      "instructions": "echo 'p2-2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6440.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n38",
+      "name": "Phase 2-3",
+      "type": "shell",
+      "instructions": "echo 'p2-3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6760.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n39",
+      "name": "Phase 2-4",
+      "type": "shell",
+      "instructions": "echo 'p2-4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7080.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n40",
+      "name": "Phase 2-5",
+      "type": "shell",
+      "instructions": "echo 'p2-5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7400.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n41",
+      "name": "Phase 3-1",
+      "type": "shell",
+      "instructions": "echo 'p3-1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6120.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n42",
+      "name": "Phase 3-2",
+      "type": "shell",
+      "instructions": "echo 'p3-2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6440.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n43",
+      "name": "Phase 3-3",
+      "type": "shell",
+      "instructions": "echo 'p3-3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6760.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n44",
+      "name": "Phase 3-4",
+      "type": "shell",
+      "instructions": "echo 'p3-4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7080.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n45",
+      "name": "Phase 3-5",
+      "type": "shell",
+      "instructions": "echo 'p3-5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7400.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n46",
+      "name": "Phase 4-1",
+      "type": "shell",
+      "instructions": "echo 'p4-1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6120.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n47",
+      "name": "Phase 4-2",
+      "type": "shell",
+      "instructions": "echo 'p4-2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6440.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n48",
+      "name": "Phase 4-3",
+      "type": "shell",
+      "instructions": "echo 'p4-3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 6760.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n49",
+      "name": "Phase 4-4",
+      "type": "shell",
+      "instructions": "echo 'p4-4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7080.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n50",
+      "name": "Phase 4-5",
+      "type": "shell",
+      "instructions": "echo 'p4-5'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7400.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n51",
+      "name": "Join Phase 2",
+      "type": "shell",
+      "instructions": "echo 'join p2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7720.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n52",
+      "name": "Join Phase 3",
+      "type": "shell",
+      "instructions": "echo 'join p3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7720.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n53",
+      "name": "Join Phase 4",
+      "type": "shell",
+      "instructions": "echo 'join p4'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 7720.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n54",
+      "name": "Final Merge",
+      "type": "shell",
+      "instructions": "echo 'final merge'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 8040.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n55",
+      "name": "Validate 1",
+      "type": "shell",
+      "instructions": "echo 'validate 1'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 8360.0,
+        "y": 320.0
+      }
+    },
+    {
+      "id": "n56",
+      "name": "Validate 2",
+      "type": "shell",
+      "instructions": "echo 'validate 2'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 8360.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n57",
+      "name": "Validate 3",
+      "type": "shell",
+      "instructions": "echo 'validate 3'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 8360.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "n58",
+      "name": "Report",
+      "type": "shell",
+      "instructions": "echo 'report'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 8680.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n59",
+      "name": "Notify",
+      "type": "shell",
+      "instructions": "echo 'notify'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 9000.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "n60",
+      "name": "Finish",
+      "type": "shell",
+      "instructions": "echo 'All 60 nodes complete'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 9320.0,
+        "y": 180.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01",
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "id": "e02",
+      "from": "n02",
+      "to": "n03"
+    },
+    {
+      "id": "e03",
+      "from": "n03",
+      "to": "n04"
+    },
+    {
+      "id": "e04",
+      "from": "n04",
+      "to": "n05"
+    },
+    {
+      "id": "e05",
+      "from": "n05",
+      "to": "n06"
+    },
+    {
+      "id": "e06",
+      "from": "n06",
+      "to": "n07"
+    },
+    {
+      "id": "e07",
+      "from": "n07",
+      "to": "n08"
+    },
+    {
+      "id": "e08",
+      "from": "n08",
+      "to": "n09"
+    },
+    {
+      "id": "e09",
+      "from": "n09",
+      "to": "n10"
+    },
+    {
+      "id": "e10",
+      "from": "n10",
+      "to": "n11"
+    },
+    {
+      "id": "e11",
+      "from": "n10",
+      "to": "n16"
+    },
+    {
+      "id": "e12",
+      "from": "n10",
+      "to": "n21"
+    },
+    {
+      "id": "e13",
+      "from": "n11",
+      "to": "n12"
+    },
+    {
+      "id": "e14",
+      "from": "n12",
+      "to": "n13"
+    },
+    {
+      "id": "e15",
+      "from": "n13",
+      "to": "n14"
+    },
+    {
+      "id": "e16",
+      "from": "n14",
+      "to": "n15"
+    },
+    {
+      "id": "e17",
+      "from": "n15",
+      "to": "n26"
+    },
+    {
+      "id": "e18",
+      "from": "n16",
+      "to": "n17"
+    },
+    {
+      "id": "e19",
+      "from": "n17",
+      "to": "n18"
+    },
+    {
+      "id": "e20",
+      "from": "n18",
+      "to": "n19"
+    },
+    {
+      "id": "e21",
+      "from": "n19",
+      "to": "n20"
+    },
+    {
+      "id": "e22",
+      "from": "n20",
+      "to": "n27"
+    },
+    {
+      "id": "e23",
+      "from": "n21",
+      "to": "n22"
+    },
+    {
+      "id": "e24",
+      "from": "n22",
+      "to": "n23"
+    },
+    {
+      "id": "e25",
+      "from": "n23",
+      "to": "n24"
+    },
+    {
+      "id": "e26",
+      "from": "n24",
+      "to": "n25"
+    },
+    {
+      "id": "e27",
+      "from": "n25",
+      "to": "n28"
+    },
+    {
+      "id": "e28",
+      "from": "n26",
+      "to": "n29"
+    },
+    {
+      "id": "e29",
+      "from": "n29",
+      "to": "n30"
+    },
+    {
+      "id": "e30",
+      "from": "n27",
+      "to": "n31"
+    },
+    {
+      "id": "e31",
+      "from": "n31",
+      "to": "n32"
+    },
+    {
+      "id": "e32",
+      "from": "n28",
+      "to": "n33"
+    },
+    {
+      "id": "e33",
+      "from": "n33",
+      "to": "n34"
+    },
+    {
+      "id": "e34",
+      "from": "n30",
+      "to": "n35"
+    },
+    {
+      "id": "e35",
+      "from": "n32",
+      "to": "n35"
+    },
+    {
+      "id": "e36",
+      "from": "n34",
+      "to": "n35"
+    },
+    {
+      "id": "e37",
+      "from": "n35",
+      "to": "n36"
+    },
+    {
+      "id": "e38",
+      "from": "n35",
+      "to": "n41"
+    },
+    {
+      "id": "e39",
+      "from": "n35",
+      "to": "n46"
+    },
+    {
+      "id": "e40",
+      "from": "n36",
+      "to": "n37"
+    },
+    {
+      "id": "e41",
+      "from": "n37",
+      "to": "n38"
+    },
+    {
+      "id": "e42",
+      "from": "n38",
+      "to": "n39"
+    },
+    {
+      "id": "e43",
+      "from": "n39",
+      "to": "n40"
+    },
+    {
+      "id": "e44",
+      "from": "n40",
+      "to": "n51"
+    },
+    {
+      "id": "e45",
+      "from": "n41",
+      "to": "n42"
+    },
+    {
+      "id": "e46",
+      "from": "n42",
+      "to": "n43"
+    },
+    {
+      "id": "e47",
+      "from": "n43",
+      "to": "n44"
+    },
+    {
+      "id": "e48",
+      "from": "n44",
+      "to": "n45"
+    },
+    {
+      "id": "e49",
+      "from": "n45",
+      "to": "n52"
+    },
+    {
+      "id": "e50",
+      "from": "n46",
+      "to": "n47"
+    },
+    {
+      "id": "e51",
+      "from": "n47",
+      "to": "n48"
+    },
+    {
+      "id": "e52",
+      "from": "n48",
+      "to": "n49"
+    },
+    {
+      "id": "e53",
+      "from": "n49",
+      "to": "n50"
+    },
+    {
+      "id": "e54",
+      "from": "n50",
+      "to": "n53"
+    },
+    {
+      "id": "e55",
+      "from": "n51",
+      "to": "n54"
+    },
+    {
+      "id": "e56",
+      "from": "n52",
+      "to": "n54"
+    },
+    {
+      "id": "e57",
+      "from": "n53",
+      "to": "n54"
+    },
+    {
+      "id": "e58",
+      "from": "n54",
+      "to": "n55"
+    },
+    {
+      "id": "e59",
+      "from": "n54",
+      "to": "n56"
+    },
+    {
+      "id": "e60",
+      "from": "n54",
+      "to": "n57"
+    },
+    {
+      "id": "e61",
+      "from": "n55",
+      "to": "n58"
+    },
+    {
+      "id": "e62",
+      "from": "n56",
+      "to": "n58"
+    },
+    {
+      "id": "e63",
+      "from": "n57",
+      "to": "n58"
+    },
+    {
+      "id": "e64",
+      "from": "n58",
+      "to": "n59"
+    },
+    {
+      "id": "e65",
+      "from": "n59",
+      "to": "n60"
+    }
+  ],
+  "shared_session": true
+}

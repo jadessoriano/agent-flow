@@ -147,6 +147,31 @@ export default function AboutModal({ open, onClose }: AboutModalProps) {
               <li className="flex gap-2">
                 <span className="mt-0.5 text-violet-400">-</span>
                 <span>
+                  <strong className="text-zinc-300">Simple & Advanced Modes</strong>{" "}
+                  — Simple Mode offers friendly labels and form-based config for
+                  beginners. Advanced Mode unlocks variable syntax, loops, and
+                  parallel execution.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="mt-0.5 text-violet-400">-</span>
+                <span>
+                  <strong className="text-zinc-300">Template Gallery</strong>{" "}
+                  — Start from pre-built templates for common workflows like code
+                  review, bug fixing, testing, and documentation generation.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="mt-0.5 text-violet-400">-</span>
+                <span>
+                  <strong className="text-zinc-300">Guided Setup</strong>{" "}
+                  — First-run wizard detects your Claude CLI, checks
+                  authentication, and sets up your project automatically.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="mt-0.5 text-violet-400">-</span>
+                <span>
                   <strong className="text-zinc-300">Multi-Project Support</strong>{" "}
                   — Open any project directory. Recent projects are remembered for
                   quick switching.

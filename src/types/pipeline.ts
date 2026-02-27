@@ -76,28 +76,22 @@ export interface PipelineInfo {
 }
 
 // Node type metadata for the palette
-export const NODE_TYPE_META: Record<
-  NodeType,
-  { label: string; color: string; icon: string }
-> = {
-  "ai-task": { label: "AI Task", color: "#8b5cf6", icon: "brain" },
-  shell: { label: "Shell", color: "#22c55e", icon: "terminal" },
-  git: { label: "Git", color: "#f97316", icon: "git" },
-  parallel: { label: "Parallel", color: "#3b82f6", icon: "layers" },
-  loop: { label: "Loop", color: "#ec4899", icon: "loop" },
-  "approval-gate": {
-    label: "Approval Gate",
-    color: "#eab308",
-    icon: "shield",
-  },
-  "sub-pipeline": {
-    label: "Sub-pipeline",
-    color: "#06b6d4",
-    icon: "workflow",
-  },
-  comment: {
-    label: "Comment",
-    color: "#a1a1aa",
-    icon: "message",
-  },
+export interface NodeTypeMeta {
+  label: string;
+  friendlyLabel: string;
+  description: string;
+  color: string;
+  icon: string;
+  isAdvanced: boolean;
+}
+
+export const NODE_TYPE_META: Record<NodeType, NodeTypeMeta> = {
+  "ai-task":       { label: "AI Task",       friendlyLabel: "AI Step",              description: "Ask Claude to do something with your code",           color: "#8b5cf6", icon: "brain",    isAdvanced: false },
+  "shell":         { label: "Shell",         friendlyLabel: "Run Command",          description: "Execute a shell command",                            color: "#22c55e", icon: "terminal", isAdvanced: false },
+  "git":           { label: "Git",           friendlyLabel: "Git Action",           description: "Run a git operation",                                color: "#f97316", icon: "git",      isAdvanced: false },
+  "parallel":      { label: "Parallel",      friendlyLabel: "Parallel Group",       description: "Run multiple steps at the same time",                color: "#3b82f6", icon: "layers",   isAdvanced: true  },
+  "loop":          { label: "Loop",          friendlyLabel: "Repeat",               description: "Repeat steps for each item in a list",               color: "#ec4899", icon: "loop",     isAdvanced: true  },
+  "approval-gate": { label: "Approval Gate", friendlyLabel: "Wait for Approval",    description: "Pause and wait for you to approve before continuing", color: "#eab308", icon: "shield",   isAdvanced: false },
+  "sub-pipeline":  { label: "Sub-pipeline",  friendlyLabel: "Run Another Pipeline", description: "Run a different pipeline as a step",                 color: "#06b6d4", icon: "workflow", isAdvanced: true  },
+  "comment":       { label: "Comment",       friendlyLabel: "Note",                 description: "Add a note to the canvas (doesn't execute)",         color: "#a1a1aa", icon: "message",  isAdvanced: false },
 };

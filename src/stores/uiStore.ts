@@ -16,6 +16,7 @@ interface UIState {
   fitViewTrigger: number;
   toasts: Toast[];
   focusNodeId: string | null;
+  compactCanvas: boolean;
 
   openPanel: (view: PanelView) => void;
   closePanel: () => void;
@@ -26,6 +27,7 @@ interface UIState {
   removeToast: (id: string) => void;
   focusNode: (nodeId: string) => void;
   clearFocusNode: () => void;
+  toggleCompactCanvas: () => void;
 }
 
 let toastCounter = 0;
@@ -37,6 +39,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   fitViewTrigger: 0,
   toasts: [],
   focusNodeId: null,
+  compactCanvas: false,
 
   openPanel: (view: PanelView) => {
     set({ panelView: view, panelOpen: true });
@@ -78,5 +81,9 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   clearFocusNode: () => {
     set({ focusNodeId: null });
+  },
+
+  toggleCompactCanvas: () => {
+    set((s) => ({ compactCanvas: !s.compactCanvas }));
   },
 }));

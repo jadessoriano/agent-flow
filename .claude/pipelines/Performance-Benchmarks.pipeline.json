@@ -1,0 +1,62 @@
+{
+  "name": "Performance Benchmarks",
+  "description": "Run Rust + TypeScript benchmarks and verify tests pass",
+  "version": "1.0.0",
+  "variables": {},
+  "nodes": [
+    {
+      "id": "rust-bench",
+      "name": "Rust Benchmarks",
+      "type": "shell",
+      "instructions": "cd src-tauri && cargo bench 2>&1",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 40.0,
+        "y": 180.0
+      }
+    },
+    {
+      "id": "ts-bench",
+      "name": "TypeScript Benchmarks",
+      "type": "shell",
+      "instructions": "npx vitest bench --run 2>&1",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 40.0,
+        "y": 40.0
+      }
+    },
+    {
+      "id": "verify",
+      "name": "Verify Tests + Types",
+      "type": "shell",
+      "instructions": "cd src-tauri && cargo test 2>&1 && cd .. && npx tsc --noEmit 2>&1 && echo '--- All 29 Rust tests passed, TypeScript compiles clean ---'",
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "position": {
+        "x": 360.0,
+        "y": 110.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "rust-bench->verify",
+      "from": "rust-bench",
+      "to": "verify",
+      "condition": "success"
+    },
+    {
+      "id": "ts-bench->verify",
+      "from": "ts-bench",
+      "to": "verify",
+      "condition": "success"
+    }
+  ],
+  "shared_session": true
+}

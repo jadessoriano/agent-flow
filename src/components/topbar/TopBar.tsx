@@ -11,6 +11,7 @@ import AboutModal from "../AboutModal";
 import InputPrompt from "../modals/InputPrompt";
 import GeneratePrompt from "../modals/GeneratePrompt";
 import DiffModal from "../modals/DiffModal";
+import SetupWizard from "../modals/SetupWizard";
 
 export default function TopBar() {
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -28,6 +29,23 @@ export default function TopBar() {
   const startRun = useRunStore((s) => s.startRun);
   const cancelRun = useRunStore((s) => s.cancelRun);
   const settings = useSettingsStore((s) => s.settings);
+  const mode = useSettingsStore((s) => s.local.mode);
+  const setModeRaw = useSettingsStore((s) => s.setMode);
+
+  const handleModeSwitch = (newMode: "simple" | "advanced") => {
+    if (newMode === "simple" && currentPipeline) {
+      const hasAdvancedSyntax = currentPipeline.nodes.some((n) =>
+        /\{output\.\w+\}|\$[A-Z_]+/.test(n.instructions),
+      );
+      if (hasAdvancedSyntax) {
+        addToast(
+          "Some steps use advanced syntax. They'll still work, but switch to Advanced Mode to edit them.",
+          "warning",
+        );
+      }
+    }
+    setModeRaw(newMode);
+  };
   const togglePanel = useUIStore((s) => s.togglePanel);
   const openPanel = useUIStore((s) => s.openPanel);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -35,6 +53,7 @@ export default function TopBar() {
   const [inputPromptOpen, setInputPromptOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const savedPipeline = usePipelineStore((s) => s.savedPipeline);
   const loadGeneratedPipeline = usePipelineStore((s) => s.loadGeneratedPipeline);
   const switcherRef = useRef<HTMLDivElement>(null);
@@ -71,9 +90,14 @@ export default function TopBar() {
   };
 
   const handleRunClick = async () => {
-    if (!currentPipeline || !currentProject) return;
+    if (!currentPipeline) return;
     if (running) {
       cancelRun();
+      return;
+    }
+    // Check prerequisites — show wizard if CLI or project missing
+    if (!settings.claude_cli_path || !currentProject) {
+      setWizardOpen(true);
       return;
     }
     // Validate pipeline before running
@@ -328,6 +352,31 @@ export default function TopBar() {
         >
           {running ? "Cancel" : "Run"}
         </button>
+        {/* Mode Toggle — only visible with a pipeline open */}
+        {currentPipeline && (
+          <div className="flex items-center rounded-md border border-zinc-700 bg-zinc-800/50">
+            <button
+              onClick={() => handleModeSwitch("simple")}
+              className={`rounded-l-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                mode === "simple"
+                  ? "bg-violet-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Simple
+            </button>
+            <button
+              onClick={() => handleModeSwitch("advanced")}
+              className={`rounded-r-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                mode === "advanced"
+                  ? "bg-violet-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Advanced
+            </button>
+          </div>
+        )}
         <button
           onClick={() => togglePanel("settings")}
           className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
@@ -404,6 +453,17 @@ export default function TopBar() {
           current={currentPipeline}
         />
       )}
+      <SetupWizard
+        open={wizardOpen}
+        projectPath={currentProject?.path ?? null}
+        cliPath={settings.claude_cli_path}
+        onComplete={() => {
+          setWizardOpen(false);
+          // After wizard completes, proceed to input prompt
+          setInputPromptOpen(true);
+        }}
+        onCancel={() => setWizardOpen(false)}
+      />
     </div>
   );
 }

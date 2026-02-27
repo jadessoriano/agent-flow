@@ -7,7 +7,7 @@ import type {
   NodeType,
 } from "../types/pipeline";
 import * as api from "../lib/tauri";
-import { saveCachedLayout } from "../lib/layoutCache";
+import { getCachedLayout, saveCachedLayout } from "../lib/layoutCache";
 
 let nodeIdCounter = 0;
 const MAX_HISTORY = 30;
@@ -477,11 +477,20 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     const { currentPipeline, currentPipelinePath, undoStack, redoStack } = get();
     if (undoStack.length === 0 || !currentPipeline) return;
     const prev = undoStack[undoStack.length - 1];
-    // Sync layout cache with restored positions so the canvas picks them up
+    // Merge restored positions into cache: keep current positions for nodes
+    // that exist in both (preserves user drags), add positions only for
+    // nodes reintroduced by the undo (e.g. undeleted nodes).
     if (currentPipelinePath) {
-      const positions: Record<string, { x: number; y: number }> = {};
-      for (const n of prev.nodes) positions[n.id] = n.position;
-      saveCachedLayout(currentPipelinePath, positions);
+      const cached = getCachedLayout(currentPipelinePath) ?? {};
+      const merged = { ...cached };
+      for (const n of prev.nodes) {
+        if (!merged[n.id]) merged[n.id] = n.position;
+      }
+      // Also update the prev snapshot positions so Canvas picks them up correctly
+      for (const n of prev.nodes) {
+        if (cached[n.id]) n.position = cached[n.id];
+      }
+      saveCachedLayout(currentPipelinePath, merged);
     }
     set({
       currentPipeline: prev,
@@ -495,11 +504,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     const { currentPipeline, currentPipelinePath, undoStack, redoStack } = get();
     if (redoStack.length === 0 || !currentPipeline) return;
     const next = redoStack[redoStack.length - 1];
-    // Sync layout cache with restored positions so the canvas picks them up
+    // Merge restored positions into cache (same logic as undo)
     if (currentPipelinePath) {
-      const positions: Record<string, { x: number; y: number }> = {};
-      for (const n of next.nodes) positions[n.id] = n.position;
-      saveCachedLayout(currentPipelinePath, positions);
+      const cached = getCachedLayout(currentPipelinePath) ?? {};
+      const merged = { ...cached };
+      for (const n of next.nodes) {
+        if (!merged[n.id]) merged[n.id] = n.position;
+      }
+      for (const n of next.nodes) {
+        if (cached[n.id]) n.position = cached[n.id];
+      }
+      saveCachedLayout(currentPipelinePath, merged);
     }
     set({
       currentPipeline: next,

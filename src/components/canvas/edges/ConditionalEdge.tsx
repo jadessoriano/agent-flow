@@ -5,6 +5,7 @@ import {
   getBezierPath,
   type EdgeProps,
 } from "@xyflow/react";
+import { useSettingsStore } from "../../../stores/settingsStore";
 
 export interface NodeRect {
   x: number;
@@ -116,7 +117,13 @@ function ConditionalEdge({
   const edgeData = data as ConditionalEdgeData | undefined;
   const condition = edgeData?.condition;
   const isSynthetic = edgeData?.synthetic === true;
+  const isDimmed = edgeData?.dimmed === true;
   const routeOffset = edgeData?.routeOffset ?? 0;
+  const isSimple = useSettingsStore.getState().local.mode === "simple";
+
+  // Fully hide synthetic edges when dimmed (hover-focus on a different node).
+  // CSS alone can't reach the SVG marker <defs>, so we bail out here.
+  if (isSynthetic && isDimmed) return null;
 
   // Detect backward edge: source is to the right of (or very close to) target
   // directPath edges (reversed synthetic edges) skip backward detection
@@ -147,7 +154,7 @@ function ConditionalEdge({
 
   let strokeColor = isSynthetic
     ? (edgeData?.synthColor ?? "#ec4899")
-    : "#71717a"; // zinc-500
+    : "#a1a1aa"; // zinc-400 — brighter for dark canvas visibility
   if (!isSynthetic) {
     if (condition === "success") strokeColor = "#22c55e";
     if (condition === "failure") strokeColor = "#ef4444";
@@ -216,11 +223,13 @@ function ConditionalEdge({
                     : "bg-zinc-700 text-zinc-400"
               }`}
             >
-              {condition}
+              {isSimple
+                ? condition === "success" ? "If successful" : condition === "failure" ? "If failed" : condition
+                : condition}
             </span>
           ) : (
-            <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">
-              then →
+            <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">
+              {isSimple ? "Then" : "then →"}
             </span>
           )}
         </div>
@@ -243,6 +252,7 @@ export default memo(ConditionalEdge, (prev, next) => {
     pd?.condition === nd?.condition &&
     pd?.synthetic === nd?.synthetic &&
     pd?.synthLabel === nd?.synthLabel &&
+    pd?.synthColor === nd?.synthColor &&
     pd?.routeOffset === nd?.routeOffset &&
     pd?.directPath === nd?.directPath &&
     pd?.dimmed === nd?.dimmed &&

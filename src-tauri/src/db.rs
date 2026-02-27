@@ -2,7 +2,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
+
+static USAGE_STATS_CACHE: std::sync::LazyLock<Mutex<Option<(Instant, UsageStats)>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRow {
@@ -183,6 +188,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
         .execute(pool)
         .await
         .map_err(|e| format!("Migration failed (idx_runs_pipeline_name): {}", e))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)")
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Migration failed (idx_runs_status): {}", e))?;
 
     // Add loop iteration columns (safe to run on existing DBs)
     let _ = sqlx::query("ALTER TABLE run_steps ADD COLUMN iteration_index INTEGER")
@@ -510,7 +519,22 @@ pub async fn get_cost_summary(pool: &SqlitePool) -> Result<CostSummary, String> 
     })
 }
 
+pub fn invalidate_usage_stats_cache() {
+    if let Ok(mut guard) = USAGE_STATS_CACHE.lock() {
+        *guard = None;
+    }
+}
+
 pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
+    // Check cache first (30-second TTL)
+    if let Ok(guard) = USAGE_STATS_CACHE.lock() {
+        if let Some((cached_at, ref stats)) = *guard {
+            if cached_at.elapsed() < Duration::from_secs(30) {
+                return Ok(stats.clone());
+            }
+        }
+    }
+
     // Consolidated scalar query: total cost, total runs, total AI steps, avg duration (4 queries → 1)
     let stats_row = sqlx::query(
         "SELECT
@@ -634,7 +658,7 @@ pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
         })
         .collect();
 
-    Ok(UsageStats {
+    let stats = UsageStats {
         total_cost_usd,
         total_runs,
         total_ai_steps,
@@ -644,7 +668,14 @@ pub async fn get_usage_stats(pool: &SqlitePool) -> Result<UsageStats, String> {
         runs,
         top_nodes,
         top_pipelines,
-    })
+    };
+
+    // Cache the result
+    if let Ok(mut guard) = USAGE_STATS_CACHE.lock() {
+        *guard = Some((Instant::now(), stats.clone()));
+    }
+
+    Ok(stats)
 }
 
 /// Find a cached successful step matching the given instructions hash.

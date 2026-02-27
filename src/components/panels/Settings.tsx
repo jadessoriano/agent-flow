@@ -2,12 +2,15 @@ import { useEffect, useState, memo } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { detectClaudeCliDetailed } from "../../lib/tauri";
 import { logWarning, addToast } from "../../lib/errorReporter";
+import type { ExperienceMode } from "../../types/settings";
 
 export default memo(function Settings() {
   const settings = useSettingsStore((s) => s.settings);
   const loading = useSettingsStore((s) => s.loading);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
+  const mode = useSettingsStore((s) => s.local.mode);
+  const setMode = useSettingsStore((s) => s.setMode);
   const [cliPath, setCliPath] = useState(settings.claude_cli_path ?? "");
   const [detecting, setDetecting] = useState(false);
   const [detectInfo, setDetectInfo] = useState<{
@@ -21,7 +24,7 @@ export default memo(function Settings() {
 
   useEffect(() => {
     setCliPath(settings.claude_cli_path ?? "");
-  }, [settings]);
+  }, [settings.claude_cli_path]);
 
   const handleSave = async () => {
     await updateSettings({
@@ -63,6 +66,33 @@ export default memo(function Settings() {
         <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
           Global Settings
         </h3>
+      </div>
+
+      {/* Experience Mode */}
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-zinc-300">
+          Experience Mode
+        </label>
+        <div className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800 p-1">
+          {(["simple", "advanced"] as ExperienceMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                mode === m
+                  ? "bg-violet-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700"
+              }`}
+            >
+              {m === "simple" ? "Simple" : "Advanced"}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 text-xs text-zinc-500">
+          {mode === "simple"
+            ? "Form-based configuration with friendly labels. Best for getting started."
+            : "Full control with variable syntax, loops, and parallel execution."}
+        </div>
       </div>
 
       {/* Claude CLI Path */}
